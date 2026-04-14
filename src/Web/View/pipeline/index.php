@@ -1,5 +1,13 @@
 <?php use App\Web\Core\Html; ?>
 
+<?php if (!empty($refreshSeconds)): ?>
+    <script>
+        window.setTimeout(function () {
+            window.location.reload();
+        }, <?= (int) $refreshSeconds * 1000 ?>);
+    </script>
+<?php endif; ?>
+
 <?php if (!empty($started)): ?>
     <div class="alert alert-success border-0 shadow-sm">Pipeline-Job wurde gestartet und laeuft im Hintergrund.</div>
 <?php endif; ?>
@@ -164,10 +172,27 @@
     <div class="d-flex justify-content-between align-items-start mb-3">
         <div>
             <h2 class="h5 mb-1">Ausfuehrungsstatus</h2>
-            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle. Bei laufenden Jobs Seite einfach neu laden.</div>
+            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle. Bei laufenden Jobs wird die Seite leichtgewichtig automatisch aktualisiert.</div>
         </div>
         <?php $statusLabel = $runningRun ? 'running' : 'idle'; ?>
         <span class="badge <?= Html::badgeClass($runningRun ? 'running' : 'info') ?>"><?= Html::escape($statusLabel) ?></span>
+    </div>
+    <div class="border rounded-4 p-3 p-lg-4 bg-light-subtle mb-3">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
+            <div>
+                <div class="small text-secondary mb-1">Fortschrittsbild</div>
+                <div class="fw-semibold mb-1"><?= Html::escape($progressSummary['headline'] ?? 'Kein Lauf vorhanden.') ?></div>
+                <div class="text-secondary small"><?= Html::escape($progressSummary['detail'] ?? 'Kein Fortschrittslog verfuegbar.') ?></div>
+            </div>
+            <div class="d-flex flex-column align-items-lg-end">
+                <div class="small text-secondary">Laufdauer</div>
+                <div class="fw-semibold"><?= Html::escape($progressSummary['duration_label'] ?? '00:00:00') ?></div>
+                <div class="small text-secondary mt-1">Letztes Update: <?= Html::escape($progressSummary['last_update'] ?? '-') ?></div>
+                <?php if (!empty($progressSummary['refresh_hint'])): ?>
+                    <div class="small text-primary mt-2"><?= Html::escape($progressSummary['refresh_hint']) ?></div>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
     <div class="row g-3">
         <div class="col-12 col-md-6 col-xl-3">
@@ -186,6 +211,13 @@
             <div class="border rounded-4 p-3 h-100 bg-light-subtle">
                 <div class="small text-secondary mb-1">Letztes Ende</div>
                 <div class="fw-semibold"><?= Html::escape($latestRun['ended_at'] ?? '-') ?></div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="small text-secondary mb-1">Run-ID / Logzeilen</div>
+                <div class="fw-semibold">#<?= Html::escape($latestRun['id'] ?? '-') ?></div>
+                <div class="small text-secondary mt-1"><?= Html::escape($runLogCount ?? 0) ?> Logzeilen im Lauf</div>
             </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3">
@@ -218,6 +250,43 @@
                 <?php endif; ?>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="panel-card p-0 mb-4">
+    <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center">
+        <div>
+            <h2 class="h5 mb-0">Fortschritts-Timeline</h2>
+            <div class="small text-secondary mt-1">Die letzten 5 Statuswechsel oder Logmeldungen des aktiven bzw. letzten Laufs.</div>
+        </div>
+        <?php if (!empty($runningRun)): ?>
+            <span class="badge <?= Html::badgeClass('running') ?>">Auto-Refresh aktiv</span>
+        <?php endif; ?>
+    </div>
+    <div class="p-4">
+        <?php if (empty($progressLogs)): ?>
+            <div class="text-secondary small">Keine Fortschrittsdaten verfuegbar.</div>
+        <?php else: ?>
+            <div class="d-grid gap-3">
+                <?php foreach ($progressLogs as $index => $log): ?>
+                    <div class="border rounded-4 p-3 bg-light-subtle">
+                        <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
+                            <div class="fw-semibold"><?= Html::escape($log['message'] ?? '') ?></div>
+                            <div class="small text-secondary"><?= Html::escape($log['created_at'] ?? '-') ?></div>
+                        </div>
+                        <div class="small text-secondary mt-2">
+                            Schritt <?= Html::escape($index + 1) ?>
+                            <?php if (!empty($log['run_type'])): ?>
+                                · <?= Html::escape($log['run_type']) ?>
+                            <?php endif; ?>
+                            <?php if (!empty($log['level'])): ?>
+                                · <?= Html::escape($log['level']) ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 

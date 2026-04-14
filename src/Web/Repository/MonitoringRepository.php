@@ -326,6 +326,27 @@ final class MonitoringRepository
         }
     }
 
+    public function countLogsForRun(?int $runId): int
+    {
+        if ($runId === null || $runId <= 0) {
+            return 0;
+        }
+
+        try {
+            $stmt = $this->stageDb->prepare('SELECT COUNT(*) FROM sync_logs WHERE sync_run_id = :run_id');
+            $stmt->bindValue(':run_id', $runId, \PDO::PARAM_INT);
+            $stmt->execute();
+
+            return (int) $stmt->fetchColumn();
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return 0;
+            }
+
+            throw $exception;
+        }
+    }
+
     public function latestLogForRun(?int $runId = null): ?array
     {
         if ($runId === null || $runId <= 0) {

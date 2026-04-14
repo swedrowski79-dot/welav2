@@ -39,6 +39,9 @@ final class PipelineController extends Controller
         $focusRun = $monitoringRepository->latestRunningRun();
         $latestRun = $focusRun ?? $monitoringRepository->latestRun();
         $activeLog = $monitoringRepository->latestLogForRun((int) ($latestRun['id'] ?? 0));
+        $recentLogs = $monitoringRepository->recentPipelineLogs((int) ($latestRun['id'] ?? 0), 10);
+        $progressLogs = array_slice($recentLogs, 0, 5);
+        $progressSummary = $this->progressSummary($focusRun, $latestRun, $activeLog, $progressLogs);
 
         return $this->render('pipeline/index', [
             'pageTitle' => 'Pipeline & Export Queue',
@@ -54,8 +57,12 @@ final class PipelineController extends Controller
             'runningRun' => $focusRun,
             'latestRun' => $latestRun,
             'activeLog' => $activeLog,
+            'progressLogs' => $progressLogs,
+            'progressSummary' => $progressSummary,
+            'refreshSeconds' => $focusRun ? 10 : null,
+            'runLogCount' => $monitoringRepository->countLogsForRun((int) ($latestRun['id'] ?? 0)),
             'latestError' => $monitoringRepository->latestPipelineError(),
-            'recentLogs' => $monitoringRepository->recentPipelineLogs((int) ($latestRun['id'] ?? 0), 10),
+            'recentLogs' => $recentLogs,
             'started' => $request->query('started') === '1',
             'migrationsDone' => $request->int('migrations_done'),
             'resetDone' => $request->string('reset_done'),
@@ -139,5 +146,59 @@ final class PipelineController extends Controller
         } catch (\Throwable $exception) {
             Response::redirect(Html::buildUrl($redirectPath, ['error' => $exception->getMessage()]));
         }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $progressLogs
+     * @return array{headline:string, detail:string, duration_label:string, refresh_hint:?string, last_update:string}
+     */
+    private function progressSummary(?array $runningRun, ?array $latestRun, ?array $activeLog, array $progressLogs): array
+    {
+        $run = $runningRun ?? $latestRun;
+        $isRunning = $runningRun !== null;
+        $runType = (string) ($run['run_type'] ?? 'pipeline');
+        $durationSeconds = max(0, (int) ($run['duration_seconds'] ?? 0));
+        $headline = $isRunning
+            ? sprintf('%s laeuft gerade.', $this->humanizeRunType($runType))
+            : sprintf('Letzter Schritt: %s.', $this->humanizeRunType($runType));
+        $detail = 'Kein Fortschrittslog verfuegbar.';
+
+        if (!empty($activeLog['message'])) {
+            $detail = (string) $activeLog['message'];
+        } elseif ($progressLogs !== []) {
+            $detail = (string) ($progressLogs[0]['message'] ?? $detail);
+        }
+
+        return [
+            'headline' => $headline,
+            'detail' => $detail,
+            'duration_label' => $this->formatDuration($durationSeconds),
+            'refresh_hint' => $isRunning ? 'Seite aktualisiert sich automatisch alle 10 Sekunden waehrend des aktiven Laufs.' : null,
+            'last_update' => (string) (($activeLog['created_at'] ?? null) ?: ($run['started_at'] ?? '-')),
+        ];
+    }
+
+    private function humanizeRunType(string $runType): string
+    {
+        return match ($runType) {
+            'import_all' => 'Import',
+            'import_products' => 'Produkt-Import',
+            'import_categories' => 'Kategorie-Import',
+            'merge' => 'Merge',
+            'expand' => 'Expand',
+            'delta_products', 'delta' => 'Delta',
+            'export_queue_worker' => 'Export Worker',
+            'full_pipeline' => 'Full Pipeline',
+            default => $runType !== '' ? $runType : 'Pipeline',
+        };
+    }
+
+    private function formatDuration(int $seconds): string
+    {
+        $hours = intdiv($seconds, 3600);
+        $minutes = intdiv($seconds % 3600, 60);
+        $remainingSeconds = $seconds % 60;
+
+        return sprintf('%02d:%02d:%02d', $hours, $minutes, $remainingSeconds);
     }
 }
