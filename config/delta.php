@@ -4,6 +4,8 @@ return [
     'product_export_queue' => [
         'entity_type' => 'product',
         'worker_batch_size' => 100,
+        'worker_max_attempts' => 3,
+        'worker_retry_delay_seconds' => 300,
         'stage_table' => 'stage_products',
         'translation_table' => 'stage_product_translations',
         'attribute_table' => 'stage_attribute_translations',

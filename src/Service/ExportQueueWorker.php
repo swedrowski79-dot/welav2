@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+final class PermanentExportQueueException extends RuntimeException
+{
+}
+
 final class ExportQueueWorker
 {
     private string $queueTable;
@@ -10,6 +14,8 @@ final class ExportQueueWorker
     private string $stateHashField;
     private string $offlineHash;
     private int $workerBatchSize;
+    private int $workerMaxAttempts;
+    private int $workerRetryDelaySeconds;
 
     public function __construct(
         private PDO $stageDb,
@@ -25,6 +31,8 @@ final class ExportQueueWorker
         $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
         $this->offlineHash = hash('sha256', (string) ($config['offline_hash_value'] ?? 'offline'));
         $this->workerBatchSize = max(1, (int) ($config['worker_batch_size'] ?? 100));
+        $this->workerMaxAttempts = max(1, (int) ($config['worker_max_attempts'] ?? 3));
+        $this->workerRetryDelaySeconds = max(0, (int) ($config['worker_retry_delay_seconds'] ?? 300));
     }
 
     public function run(?int $limit = null): array
@@ -34,6 +42,8 @@ final class ExportQueueWorker
             'claimed' => count($entries),
             'processed' => 0,
             'done' => 0,
+            'retried' => 0,
+            'permanent_error' => 0,
             'error' => 0,
         ];
 
@@ -51,7 +61,7 @@ final class ExportQueueWorker
                 $claimToken = (string) ($entry['claim_token'] ?? '');
 
                 if ($entityId <= 0) {
-                    throw new RuntimeException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
+                    throw new PermanentExportQueueException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
                 }
 
                 if ($claimToken === '') {
@@ -70,7 +80,8 @@ final class ExportQueueWorker
                     $this->stageDb->rollBack();
                 }
 
-                $this->markError($queueId, (string) ($entry['claim_token'] ?? ''), $exception->getMessage());
+                $result = $this->handleFailure($entry, $exception);
+                $stats[$result]++;
                 $stats['error']++;
             }
         }
@@ -92,8 +103,10 @@ final class ExportQueueWorker
             $stmt = $this->stageDb->prepare(
                 "SELECT id
                  FROM `{$this->queueTable}`
-                 WHERE status = :status AND entity_type = :entity_type
-                 ORDER BY created_at ASC, id ASC
+                 WHERE status = :status
+                   AND entity_type = :entity_type
+                   AND available_at <= NOW()
+                 ORDER BY available_at ASC, created_at ASC, id ASC
                  LIMIT :limit
                  FOR UPDATE"
             );
@@ -125,6 +138,7 @@ final class ExportQueueWorker
             $claimSql = sprintf(
                 "UPDATE `%s`
                  SET status = :processing_status,
+                     attempt_count = attempt_count + 1,
                      claim_token = :claim_token,
                      claimed_at = NOW()
                  WHERE id IN (%s)",
@@ -144,7 +158,7 @@ final class ExportQueueWorker
         }
 
         $stmt = $this->stageDb->prepare(
-            "SELECT id, entity_type, entity_id, action, payload, status, claim_token, claimed_at, created_at
+            "SELECT id, entity_type, entity_id, action, payload, status, attempt_count, available_at, claim_token, claimed_at, processed_at, last_error, created_at
              FROM `{$this->queueTable}`
              WHERE claim_token = :claim_token
              ORDER BY claimed_at ASC, id ASC"
@@ -161,7 +175,7 @@ final class ExportQueueWorker
         $payload = json_decode((string) ($entry['payload'] ?? ''), true);
 
         if (!is_array($payload)) {
-            throw new RuntimeException('Queue-Payload ist kein gueltiges JSON.');
+            throw new PermanentExportQueueException('Queue-Payload ist kein gueltiges JSON.');
         }
 
         if (($entry['action'] ?? '') === 'update' && (($payload['online'] ?? null) === 0 || ($payload['online'] ?? null) === '0')) {
@@ -171,7 +185,7 @@ final class ExportQueueWorker
         $hash = $payload['hash'] ?? null;
 
         if (!is_string($hash) || trim($hash) === '') {
-            throw new RuntimeException('Queue-Payload enthaelt keinen bestaetigbaren Hash.');
+            throw new PermanentExportQueueException('Queue-Payload enthaelt keinen bestaetigbaren Hash.');
         }
 
         return $hash;
@@ -182,7 +196,9 @@ final class ExportQueueWorker
         $stmt = $this->stageDb->prepare(
             "UPDATE `{$this->queueTable}`
              SET status = :status,
-                 claim_token = NULL
+                 claim_token = NULL,
+                 processed_at = NOW(),
+                 last_error = NULL
              WHERE id = :id AND claim_token = :claim_token"
         );
         $stmt->execute([
@@ -196,31 +212,91 @@ final class ExportQueueWorker
         }
     }
 
-    private function markError(int $queueId, string $claimToken, string $message): void
+    private function handleFailure(array $entry, Throwable $exception): string
     {
+        $queueId = (int) ($entry['id'] ?? 0);
+        $claimToken = (string) ($entry['claim_token'] ?? '');
+        $attemptCount = (int) ($entry['attempt_count'] ?? 0);
+        $retryable = !$exception instanceof PermanentExportQueueException;
+        $hasAttemptsLeft = $attemptCount < $this->workerMaxAttempts;
+        $context = [
+            'queue_id' => $queueId,
+            'attempt_count' => $attemptCount,
+            'max_attempts' => $this->workerMaxAttempts,
+            'retryable' => $retryable,
+            'exception' => $exception->getMessage(),
+        ];
+
         if ($queueId > 0 && $claimToken !== '') {
+            if ($retryable && $hasAttemptsLeft) {
+                $availableAt = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+                    ->modify('+' . $this->workerRetryDelaySeconds . ' seconds')
+                    ->format('Y-m-d H:i:s');
+
+                $stmt = $this->stageDb->prepare(
+                    "UPDATE `{$this->queueTable}`
+                     SET status = :status,
+                         claim_token = NULL,
+                         available_at = :available_at,
+                         last_error = :last_error
+                     WHERE id = :id AND claim_token = :claim_token"
+                );
+                $stmt->execute([
+                    ':status' => 'pending',
+                    ':available_at' => $availableAt,
+                    ':last_error' => $exception->getMessage(),
+                    ':id' => $queueId,
+                    ':claim_token' => $claimToken,
+                ]);
+
+                $context['next_retry_at'] = $availableAt;
+                $this->logFailure('warning', 'Export Queue Eintrag fuer Retry vorgemerkt.', $context);
+
+                return 'retried';
+            }
+
             $stmt = $this->stageDb->prepare(
                 "UPDATE `{$this->queueTable}`
                  SET status = :status,
-                     claim_token = NULL
+                     claim_token = NULL,
+                     processed_at = NOW(),
+                     last_error = :last_error
                  WHERE id = :id AND claim_token = :claim_token"
             );
             $stmt->execute([
                 ':status' => 'error',
+                ':last_error' => $exception->getMessage(),
                 ':id' => $queueId,
                 ':claim_token' => $claimToken,
             ]);
         }
 
-        if ($this->monitor !== null) {
-            $this->monitor->log($this->runId, 'error', 'Export Queue Eintrag fehlgeschlagen.', [
-                'queue_id' => $queueId,
-                'exception' => $message,
-            ]);
-            $this->monitor->error($this->runId, 'Export Queue Eintrag fehlgeschlagen.', [
+        $context['final_status'] = 'error';
+
+        if ($retryable && !$hasAttemptsLeft) {
+            $context['reason'] = 'max_attempts_exhausted';
+        } else {
+            $context['reason'] = 'permanent_error';
+        }
+
+        $this->logFailure('error', 'Export Queue Eintrag fehlgeschlagen.', $context);
+
+        return 'permanent_error';
+    }
+
+    private function logFailure(string $level, string $message, array $context): void
+    {
+        if ($this->monitor === null) {
+            return;
+        }
+
+        $this->monitor->log($this->runId, $level, $message, $context);
+
+        if ($level === 'error') {
+            $this->monitor->error($this->runId, $message, [
                 'source' => 'export_queue_worker',
-                'record_identifier' => (string) $queueId,
-                'exception' => $message,
+                'record_identifier' => isset($context['queue_id']) ? (string) $context['queue_id'] : null,
+                ...$context,
             ]);
         }
     }
