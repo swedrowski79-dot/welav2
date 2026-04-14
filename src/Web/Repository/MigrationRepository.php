@@ -43,17 +43,15 @@ final class MigrationRepository
             }
 
             try {
+                if ($this->shouldSkipMigration($version, $sql)) {
+                    $this->recordMigration($version, basename($path));
+                    $executed[] = basename($path);
+                    continue;
+                }
+
                 $this->stageDb->beginTransaction();
                 $this->stageDb->exec($sql);
-
-                $stmt = $this->stageDb->prepare(
-                    'INSERT INTO schema_migrations (version, filename, executed_at)
-                     VALUES (:version, :filename, NOW())'
-                );
-                $stmt->execute([
-                    ':version' => $version,
-                    ':filename' => basename($path),
-                ]);
+                $this->recordMigration($version, basename($path));
 
                 $this->stageDb->commit();
                 $executed[] = basename($path);
@@ -94,6 +92,15 @@ final class MigrationRepository
         );
     }
 
+    private function shouldSkipMigration(string $version, string $sql): bool
+    {
+        if ($version === '001_add_stage_products_hash') {
+            return $this->columnExists('stage_products', 'hash');
+        }
+
+        return false;
+    }
+
     private function appliedMigrations(): array
     {
         if (!$this->tableExists('schema_migrations')) {
@@ -128,6 +135,30 @@ final class MigrationRepository
         $stmt->execute([':table' => $table]);
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        if (!$this->tableExists($table)) {
+            return false;
+        }
+
+        $stmt = $this->stageDb->prepare("SHOW COLUMNS FROM `{$table}` LIKE :column");
+        $stmt->execute([':column' => $column]);
+
+        return (bool) $stmt->fetchColumn();
+    }
+
+    private function recordMigration(string $version, string $filename): void
+    {
+        $stmt = $this->stageDb->prepare(
+            'INSERT INTO schema_migrations (version, filename, executed_at)
+             VALUES (:version, :filename, NOW())'
+        );
+        $stmt->execute([
+            ':version' => $version,
+            ':filename' => $filename,
+        ]);
     }
 
     private function logInfo(string $message, array $context): void
