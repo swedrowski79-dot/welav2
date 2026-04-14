@@ -19,7 +19,12 @@ final class MonitoringRepository
         try {
             [$whereSql, $params] = $this->buildRunFilters($filters);
 
-            $sql = "SELECT * FROM sync_runs {$whereSql} ORDER BY started_at DESC LIMIT :limit OFFSET :offset";
+            $sql = "SELECT *,
+                           TIMESTAMPDIFF(SECOND, started_at, COALESCE(ended_at, UTC_TIMESTAMP())) AS duration_seconds
+                    FROM sync_runs
+                    {$whereSql}
+                    ORDER BY started_at DESC
+                    LIMIT :limit OFFSET :offset";
             $stmt = $this->stageDb->prepare($sql);
 
             foreach ($params as $key => $value) {
@@ -60,7 +65,12 @@ final class MonitoringRepository
     public function findRun(int $id): ?array
     {
         try {
-            $stmt = $this->stageDb->prepare('SELECT * FROM sync_runs WHERE id = :id');
+            $stmt = $this->stageDb->prepare(
+                'SELECT *,
+                        TIMESTAMPDIFF(SECOND, started_at, COALESCE(ended_at, UTC_TIMESTAMP())) AS duration_seconds
+                 FROM sync_runs
+                 WHERE id = :id'
+            );
             $stmt->execute([':id' => $id]);
 
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -228,17 +238,53 @@ final class MonitoringRepository
 
     public function latestRunningRun(): ?array
     {
-        return $this->fetchOne('SELECT * FROM sync_runs WHERE status = "running" ORDER BY started_at DESC LIMIT 1');
+        return $this->fetchOne(
+            'SELECT *,
+                    TIMESTAMPDIFF(SECOND, started_at, COALESCE(ended_at, UTC_TIMESTAMP())) AS duration_seconds
+             FROM sync_runs
+             WHERE status = "running"
+             ORDER BY started_at DESC
+             LIMIT 1'
+        );
     }
 
     public function latestRun(): ?array
     {
-        return $this->fetchOne('SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1');
+        return $this->fetchOne(
+            'SELECT *,
+                    TIMESTAMPDIFF(SECOND, started_at, COALESCE(ended_at, UTC_TIMESTAMP())) AS duration_seconds
+             FROM sync_runs
+             ORDER BY started_at DESC
+             LIMIT 1'
+        );
     }
 
     public function latestPipelineError(): ?array
     {
         return $this->fetchOne('SELECT * FROM sync_errors ORDER BY created_at DESC LIMIT 1');
+    }
+
+    public function runSummary(): array
+    {
+        try {
+            return [
+                'running' => $this->countByStatus('running'),
+                'success_24h' => $this->countByStatusSince('success', 1),
+                'failed_24h' => $this->countByStatusSince('failed', 1),
+                'avg_duration_seconds_24h' => $this->averageDurationSince(1),
+            ];
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return [
+                    'running' => 0,
+                    'success_24h' => 0,
+                    'failed_24h' => 0,
+                    'avg_duration_seconds_24h' => null,
+                ];
+            }
+
+            throw $exception;
+        }
     }
 
     public function recentPipelineLogs(?int $runId = null, int $limit = 10): array
@@ -312,6 +358,45 @@ final class MonitoringRepository
     private function isMissingTable(\PDOException $exception): bool
     {
         return (int) ($exception->errorInfo[1] ?? 0) === self::MYSQL_TABLE_NOT_FOUND;
+    }
+
+    private function countByStatus(string $status): int
+    {
+        $stmt = $this->stageDb->prepare('SELECT COUNT(*) FROM sync_runs WHERE status = :status');
+        $stmt->execute([':status' => $status]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function countByStatusSince(string $status, int $days): int
+    {
+        $stmt = $this->stageDb->prepare(
+            'SELECT COUNT(*)
+             FROM sync_runs
+             WHERE status = :status
+               AND started_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)'
+        );
+        $stmt->bindValue(':status', $status);
+        $stmt->bindValue(':days', $days, \PDO::PARAM_INT);
+        $stmt->execute();
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function averageDurationSince(int $days): ?int
+    {
+        $stmt = $this->stageDb->prepare(
+            'SELECT AVG(TIMESTAMPDIFF(SECOND, started_at, ended_at))
+             FROM sync_runs
+             WHERE ended_at IS NOT NULL
+               AND started_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)'
+        );
+        $stmt->bindValue(':days', $days, \PDO::PARAM_INT);
+        $stmt->execute();
+
+        $value = $stmt->fetchColumn();
+
+        return $value === null ? null : (int) round((float) $value);
     }
 
     private function fetchOne(string $sql): ?array

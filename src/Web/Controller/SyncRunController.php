@@ -30,6 +30,7 @@ final class SyncRunController extends Controller
         return $this->render('sync-runs/index', [
             'pageTitle' => 'Monitoring Laeufe',
             'pageSubtitle' => 'Laufhistorie mit Status, Mengen und Dauer.',
+            'summary' => $repository->runSummary(),
             'runs' => $repository->paginatedRuns($filters, $paginator),
             'filters' => $filters,
             'paginator' => $paginator,

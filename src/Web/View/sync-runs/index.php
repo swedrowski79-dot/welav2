@@ -12,6 +12,42 @@
     <div class="alert alert-warning border-0 shadow-sm">Reset-Aktion `<?= Html::escape($resetDone) ?>` wurde ausgefuehrt und in den Logs vermerkt.</div>
 <?php endif; ?>
 
+<div class="row g-4 mb-4">
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="metric-card p-4 h-100">
+            <div class="metric-icon mb-3"><i class="bi bi-play-circle"></i></div>
+            <div class="display-6 fw-semibold"><?= Html::escape($summary['running'] ?? 0) ?></div>
+            <div class="text-secondary">Aktiv laufend</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="metric-card p-4 h-100">
+            <div class="metric-icon mb-3"><i class="bi bi-check2-circle"></i></div>
+            <div class="display-6 fw-semibold"><?= Html::escape($summary['success_24h'] ?? 0) ?></div>
+            <div class="text-secondary">Erfolgreich in 24h</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="metric-card p-4 h-100">
+            <div class="metric-icon mb-3"><i class="bi bi-exclamation-octagon"></i></div>
+            <div class="display-6 fw-semibold"><?= Html::escape($summary['failed_24h'] ?? 0) ?></div>
+            <div class="text-secondary">Fehlgeschlagen in 24h</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="metric-card p-4 h-100">
+            <div class="metric-icon mb-3"><i class="bi bi-stopwatch"></i></div>
+            <div class="display-6 fw-semibold">
+                <?php
+                $avgDuration = $summary['avg_duration_seconds_24h'] ?? null;
+                echo Html::escape($avgDuration === null ? '-' : gmdate('H:i:s', max(0, (int) $avgDuration)));
+                ?>
+            </div>
+            <div class="text-secondary">Ø Laufzeit in 24h</div>
+        </div>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4 border border-danger-subtle">
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
         <div>
@@ -102,7 +138,7 @@
 <div class="panel-card p-0">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
-            <thead><tr><th>ID</th><th>Typ</th><th>Status</th><th>Import</th><th>Merge</th><th>Fehler</th><th>Start</th><th>Ende</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Typ</th><th>Status</th><th>Import</th><th>Merge</th><th>Fehler</th><th>Dauer</th><th>Start</th><th>Ende</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($runs as $run): ?>
                 <tr>
@@ -112,6 +148,7 @@
                     <td><?= Html::escape($run['imported_records'] ?? 0) ?></td>
                     <td><?= Html::escape($run['merged_records'] ?? 0) ?></td>
                     <td><?= Html::escape($run['error_count'] ?? 0) ?></td>
+                    <td><?= Html::escape(gmdate('H:i:s', max(0, (int) ($run['duration_seconds'] ?? 0)))) ?></td>
                     <td><?= Html::escape($run['started_at'] ?? '-') ?></td>
                     <td><?= Html::escape($run['ended_at'] ?? '-') ?></td>
                     <td><a class="btn btn-sm btn-outline-primary" href="/sync-runs/show?id=<?= Html::escape($run['id']) ?>">Detail</a></td>
