@@ -107,9 +107,6 @@
                 ['action' => 'queue', 'label' => 'Reset Queue', 'warning' => 'Alle Export-Queue-Eintraege werden geloescht. Fortfahren?'],
                 ['action' => 'stage', 'label' => 'Reset Stage', 'warning' => 'Alle stage_* Tabellen werden geleert. Fortfahren?'],
                 ['action' => 'delta_state', 'label' => 'Reset Delta State', 'warning' => 'Der komplette Produkt-Delta-State wird geloescht. Fortfahren?'],
-                ['action' => 'logs', 'label' => 'Reset Logs', 'warning' => 'Alle Sync-Logs werden geloescht. Fortfahren?'],
-                ['action' => 'errors', 'label' => 'Reset Errors', 'warning' => 'Alle Sync-Fehler werden geloescht. Fortfahren?'],
-                ['action' => 'runs', 'label' => 'Reset Runs', 'warning' => 'Die komplette Sync-Laufhistorie wird geloescht. Fortfahren?'],
                 ['action' => 'full', 'label' => 'Full Reset', 'warning' => 'Queue, Stage und Delta-State werden komplett zurueckgesetzt. Fortfahren?'],
             ] as $reset): ?>
                 <form method="post" action="/pipeline/reset" onsubmit="return confirm('<?= Html::escape($reset['warning']) ?>');">

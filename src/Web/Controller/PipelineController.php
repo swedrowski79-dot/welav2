@@ -83,9 +83,10 @@ final class PipelineController extends Controller
     {
         $action = $request->postString('action');
         $confirmed = $request->postString('confirmed') === 'yes';
+        $redirectPath = in_array($action, ['logs', 'errors', 'runs'], true) ? '/logs' : '/pipeline';
 
         if (!$confirmed) {
-            Response::redirect(Html::buildUrl('/pipeline', ['error' => 'Reset nicht bestaetigt.']));
+            Response::redirect(Html::buildUrl($redirectPath, ['error' => 'Reset nicht bestaetigt.']));
             return;
         }
 
@@ -103,9 +104,9 @@ final class PipelineController extends Controller
                 default => throw new \InvalidArgumentException('Unbekannte Reset-Aktion: ' . $action),
             };
 
-            Response::redirect(Html::buildUrl('/pipeline', ['reset_done' => $action]));
+            Response::redirect(Html::buildUrl($redirectPath, ['reset_done' => $action]));
         } catch (\Throwable $exception) {
-            Response::redirect(Html::buildUrl('/pipeline', ['error' => $exception->getMessage()]));
+            Response::redirect(Html::buildUrl($redirectPath, ['error' => $exception->getMessage()]));
         }
     }
 }

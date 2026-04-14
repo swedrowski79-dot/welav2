@@ -30,6 +30,8 @@ final class LogController extends Controller
             'logs' => $repository->paginatedLogs($filters, $paginator),
             'filters' => $filters,
             'paginator' => $paginator,
+            'resetDone' => $request->string('reset_done'),
+            'errorMessage' => $request->string('error'),
             'currentPath' => $request->path(),
         ]);
     }

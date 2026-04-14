@@ -1,5 +1,35 @@
 <?php use App\Web\Core\Html; ?>
 
+<?php if (!empty($resetDone)): ?>
+    <div class="alert alert-warning border-0 shadow-sm">Reset-Aktion `<?= Html::escape($resetDone) ?>` wurde ausgefuehrt und in den Logs vermerkt.</div>
+<?php endif; ?>
+
+<?php if (!empty($errorMessage)): ?>
+    <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
+<?php endif; ?>
+
+<div class="panel-card p-4 mb-4 border border-danger-subtle">
+    <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
+        <div>
+            <h2 class="h5 mb-1 text-danger">Monitoring-Resets</h2>
+            <div class="text-secondary small">Achtung: Diese Aktionen entfernen Monitoring-Daten. Vor jedem Reset ist eine Bestaetigung erforderlich.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <?php foreach ([
+                ['action' => 'logs', 'label' => 'Reset Logs', 'warning' => 'Alle Sync-Logs werden geloescht. Fortfahren?'],
+                ['action' => 'errors', 'label' => 'Reset Errors', 'warning' => 'Alle Sync-Fehler werden geloescht. Fortfahren?'],
+                ['action' => 'runs', 'label' => 'Reset Runs', 'warning' => 'Die komplette Sync-Laufhistorie wird geloescht. Fortfahren?'],
+            ] as $reset): ?>
+                <form method="post" action="/pipeline/reset" onsubmit="return confirm('<?= Html::escape($reset['warning']) ?>');">
+                    <input type="hidden" name="action" value="<?= Html::escape($reset['action']) ?>">
+                    <input type="hidden" name="confirmed" value="yes">
+                    <button class="btn btn-outline-danger" type="submit"><?= Html::escape($reset['label']) ?></button>
+                </form>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4">
     <form class="row g-3" method="get" action="/logs">
         <div class="col-12 col-md-5">
