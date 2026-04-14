@@ -103,7 +103,6 @@ CREATE TABLE IF NOT EXISTS stage_products (
     master_sku VARCHAR(255) NULL,
     online_flag INT NULL,
     hash VARCHAR(64) NULL,
-    last_exported_hash VARCHAR(64) NULL,
     KEY idx_stage_products_afs_artikel_id (afs_artikel_id),
     KEY idx_stage_products_sku (sku),
     KEY idx_stage_products_hash (hash)
@@ -234,4 +233,11 @@ CREATE TABLE IF NOT EXISTS export_queue (
     KEY idx_export_queue_entity (entity_type, entity_id),
     KEY idx_export_queue_status (status),
     KEY idx_export_queue_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS product_export_state (
+    product_id INT NOT NULL PRIMARY KEY,
+    last_exported_hash VARCHAR(64) NULL,
+    last_seen_at DATETIME NOT NULL,
+    KEY idx_product_export_state_last_seen_at (last_seen_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

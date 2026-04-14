@@ -5,12 +5,6 @@ return [
 
         'stage_products' => [
             'base' => 'raw_afs_articles',
-            'preserve' => [
-                'key_field' => 'afs_artikel_id',
-                'fields' => [
-                    'last_exported_hash',
-                ],
-            ],
             'fields' => [
                 'afs_artikel_id' => ['from' => ['raw_afs_articles.afs_artikel_id']],
                 'sku' => ['from' => ['raw_afs_articles.sku']],

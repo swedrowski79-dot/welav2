@@ -20,7 +20,6 @@ class MergeService
 
     private function mergeTable(string $targetTable, array $definition): void
     {
-        $preservedRows = $this->loadPreservedRows($targetTable, $definition['preserve'] ?? null);
         $this->stageDb->exec("TRUNCATE TABLE `{$targetTable}`");
 
         $baseTable = $definition['base'];
@@ -40,39 +39,8 @@ class MergeService
                 $merged[$field] = $this->resolveField($fieldDef, $context);
             }
 
-            $merged = $this->applyPreservedFields($merged, $preservedRows, $definition['preserve'] ?? null);
             $this->insertRow($targetTable, $merged);
         }
-    }
-
-    private function loadPreservedRows(string $targetTable, mixed $preserveConfig): array
-    {
-        if (!is_array($preserveConfig)) {
-            return [];
-        }
-
-        $keyField = $preserveConfig['key_field'] ?? null;
-        $fields = $preserveConfig['fields'] ?? null;
-
-        if (!is_string($keyField) || $keyField === '' || !is_array($fields) || $fields === []) {
-            return [];
-        }
-
-        $selectFields = array_merge([$keyField], $fields);
-        $sql = "SELECT `" . implode("`,`", $selectFields) . "` FROM `{$targetTable}`";
-        $stmt = $this->stageDb->query($sql);
-
-        $preserved = [];
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $key = $row[$keyField] ?? null;
-            if ($key === null || $key === '') {
-                continue;
-            }
-
-            $preserved[(string) $key] = $row;
-        }
-
-        return $preserved;
     }
 
     private function fetchRows(string $table): array
@@ -129,33 +97,6 @@ class MergeService
         }
 
         return $context[$table][$field] ?? null;
-    }
-
-    private function applyPreservedFields(array $merged, array $preservedRows, mixed $preserveConfig): array
-    {
-        if (!is_array($preserveConfig)) {
-            return $merged;
-        }
-
-        $keyField = $preserveConfig['key_field'] ?? null;
-        $fields = $preserveConfig['fields'] ?? null;
-
-        if (!is_string($keyField) || $keyField === '' || !is_array($fields) || $fields === []) {
-            return $merged;
-        }
-
-        $key = $merged[$keyField] ?? null;
-        if ($key === null || $key === '') {
-            return $merged;
-        }
-
-        $preserved = $preservedRows[(string) $key] ?? [];
-
-        foreach ($fields as $field) {
-            $merged[$field] = $preserved[$field] ?? null;
-        }
-
-        return $merged;
     }
 
     private function insertRow(string $table, array $data): void

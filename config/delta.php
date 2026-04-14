@@ -6,9 +6,12 @@ return [
         'stage_table' => 'stage_products',
         'translation_table' => 'stage_product_translations',
         'attribute_table' => 'stage_attribute_translations',
+        'state_table' => 'product_export_state',
         'identity_field' => 'afs_artikel_id',
         'hash_field' => 'hash',
-        'last_exported_hash_field' => 'last_exported_hash',
+        'state_hash_field' => 'last_exported_hash',
+        'state_last_seen_field' => 'last_seen_at',
+        'offline_hash_value' => 'offline',
         'hash_fields' => [
             'afs_artikel_id',
             'sku',

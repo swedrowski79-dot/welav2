@@ -6,9 +6,12 @@ class ProductDeltaService
     private string $stageTable;
     private string $translationTable;
     private string $attributeTable;
+    private string $stateTable;
     private string $identityField;
     private string $hashField;
-    private string $lastExportedHashField;
+    private string $stateHashField;
+    private string $stateLastSeenField;
+    private string $offlineHash;
     private array $hashFields;
 
     public function __construct(
@@ -23,9 +26,12 @@ class ProductDeltaService
         $this->stageTable = (string) ($config['stage_table'] ?? 'stage_products');
         $this->translationTable = (string) ($config['translation_table'] ?? 'stage_product_translations');
         $this->attributeTable = (string) ($config['attribute_table'] ?? 'stage_attribute_translations');
+        $this->stateTable = (string) ($config['state_table'] ?? 'product_export_state');
         $this->identityField = (string) ($config['identity_field'] ?? 'afs_artikel_id');
         $this->hashField = (string) ($config['hash_field'] ?? 'hash');
-        $this->lastExportedHashField = (string) ($config['last_exported_hash_field'] ?? 'last_exported_hash');
+        $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
+        $this->stateLastSeenField = (string) ($config['state_last_seen_field'] ?? 'last_seen_at');
+        $this->offlineHash = hash('sha256', (string) ($config['offline_hash_value'] ?? 'offline'));
         $this->hashFields = is_array($config['hash_fields'] ?? null) ? $config['hash_fields'] : [];
     }
 
@@ -35,17 +41,17 @@ class ProductDeltaService
             throw new RuntimeException('Delta config for product export queue is missing hash fields.');
         }
 
+        $runTimestamp = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
         $products = $this->fetchProducts();
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
-        $pendingEntries = $this->fetchLatestPendingEntries();
-        $knownExportStates = $this->fetchKnownExportStates();
+        $states = $this->fetchStates();
 
         $stats = [
             'processed' => 0,
             'insert' => 0,
             'update' => 0,
-            'delete' => 0,
+            'offline' => 0,
             'unchanged' => 0,
             'errors' => 0,
         ];
@@ -53,6 +59,18 @@ class ProductDeltaService
         $currentEntityIds = [];
         $updateHashStmt = $this->stageDb->prepare(
             "UPDATE `{$this->stageTable}` SET `{$this->hashField}` = :hash WHERE `{$this->identityField}` = :entity_id"
+        );
+        $upsertStateStmt = $this->stageDb->prepare(
+            "INSERT INTO `{$this->stateTable}` (`product_id`, `{$this->stateHashField}`, `{$this->stateLastSeenField}`)
+             VALUES (:product_id, :hash, :last_seen_at)
+             ON DUPLICATE KEY UPDATE
+                `{$this->stateHashField}` = VALUES(`{$this->stateHashField}`),
+                `{$this->stateLastSeenField}` = VALUES(`{$this->stateLastSeenField}`)"
+        );
+        $markOfflineStateStmt = $this->stageDb->prepare(
+            "UPDATE `{$this->stateTable}`
+             SET `{$this->stateHashField}` = :hash
+             WHERE `product_id` = :product_id"
         );
 
         foreach ($products as $product) {
@@ -65,43 +83,34 @@ class ProductDeltaService
             $stats['processed']++;
 
             try {
-                $payload = $this->buildPayload(
+                $payloadData = $this->buildPayloadData(
                     $product,
                     $translations[$entityId] ?? [],
                     $attributes[$entityId] ?? []
                 );
-                $hash = $this->buildHash($payload);
+                $hash = $this->buildHash($payloadData);
 
                 $updateHashStmt->execute([
                     ':hash' => $hash,
                     ':entity_id' => $entityId,
                 ]);
 
-                $lastExportedHash = $this->normalizeString($product[$this->lastExportedHashField] ?? null);
-                if ($hash === $lastExportedHash) {
+                $state = $states[$entityId] ?? null;
+                if ($state === null) {
+                    $this->enqueue($entityId, 'insert', $payloadData, $hash);
+                    $stats['insert']++;
+                } elseif (($state[$this->stateHashField] ?? null) !== $hash) {
+                    $this->enqueue($entityId, 'update', $payloadData, $hash);
+                    $stats['update']++;
+                } else {
                     $stats['unchanged']++;
-                    continue;
                 }
 
-                $action = $lastExportedHash === null ? 'insert' : 'update';
-
-                if ($this->hasMatchingPendingEntry($pendingEntries[$entityId] ?? null, $action, $hash)) {
-                    $stats['unchanged']++;
-                    continue;
-                }
-
-                $this->enqueue($entityId, $action, [
-                    'entity_type' => $this->entityType,
-                    'entity_id' => $entityId,
-                    'hash' => $hash,
-                    'last_exported_hash' => $lastExportedHash,
-                    'data' => $payload,
+                $upsertStateStmt->execute([
+                    ':product_id' => $entityId,
+                    ':hash' => $hash,
+                    ':last_seen_at' => $runTimestamp,
                 ]);
-                $pendingEntries[$entityId] = [
-                    'action' => $action,
-                    'hash' => $hash,
-                ];
-                $stats[$action]++;
             } catch (Throwable $exception) {
                 $stats['errors']++;
                 $this->logRecordError(
@@ -112,39 +121,33 @@ class ProductDeltaService
             }
         }
 
-        foreach ($knownExportStates as $entityId => $state) {
+        foreach ($states as $entityId => $state) {
             if (isset($currentEntityIds[$entityId])) {
                 continue;
             }
 
-            if (($state['action'] ?? null) === 'delete') {
+            if (($state[$this->stateHashField] ?? null) === $this->offlineHash) {
                 continue;
             }
 
             try {
-                if ($this->hasMatchingPendingEntry($pendingEntries[$entityId] ?? null, 'delete', null)) {
-                    continue;
-                }
-
-                $this->enqueue($entityId, 'delete', [
-                    'entity_type' => $this->entityType,
-                    'entity_id' => $entityId,
-                    'hash' => null,
-                    'last_exported_hash' => $state['hash'] ?? null,
-                    'data' => null,
+                $this->enqueueOfflineUpdate($entityId);
+                $markOfflineStateStmt->execute([
+                    ':hash' => $this->offlineHash,
+                    ':product_id' => $entityId,
                 ]);
-                $stats['delete']++;
+                $stats['offline']++;
             } catch (Throwable $exception) {
                 $stats['errors']++;
                 $this->logRecordError(
                     $entityId,
-                    'Produkt-Delete konnte nicht in die Export Queue geschrieben werden.',
+                    'Produkt-Deaktivierung konnte nicht in die Export Queue geschrieben werden.',
                     $exception
                 );
             }
         }
 
-        $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['delete'];
+        $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['offline'];
 
         if ($this->monitor !== null) {
             $this->monitor->log($this->runId, 'info', 'Produkt-Delta berechnet.', [
@@ -152,7 +155,7 @@ class ProductDeltaService
                 'changed' => $stats['changed'],
                 'insert' => $stats['insert'],
                 'update' => $stats['update'],
-                'delete' => $stats['delete'],
+                'offline' => $stats['offline'],
                 'errors' => $stats['errors'],
             ]);
         }
@@ -228,69 +231,28 @@ class ProductDeltaService
         return $attributes;
     }
 
-    private function fetchLatestPendingEntries(): array
+    private function fetchStates(): array
     {
-        $stmt = $this->stageDb->prepare(
-            'SELECT entity_id, action, payload
-             FROM export_queue
-             WHERE entity_type = :entity_type
-               AND status = :status
-             ORDER BY id ASC'
+        $stmt = $this->stageDb->query(
+            "SELECT `product_id`, `{$this->stateHashField}`, `{$this->stateLastSeenField}`
+             FROM `{$this->stateTable}`
+             ORDER BY `product_id` ASC"
         );
-        $stmt->execute([
-            ':entity_type' => $this->entityType,
-            ':status' => 'pending',
-        ]);
-
-        $entries = [];
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = (int) ($row['entity_id'] ?? 0);
-            if ($entityId <= 0) {
-                continue;
-            }
-
-            $payload = $this->decodePayload($row['payload'] ?? null);
-            $entries[$entityId] = [
-                'action' => $row['action'] ?? null,
-                'hash' => $payload['hash'] ?? null,
-            ];
-        }
-
-        return $entries;
-    }
-
-    private function fetchKnownExportStates(): array
-    {
-        $stmt = $this->stageDb->prepare(
-            'SELECT entity_id, action, payload
-             FROM export_queue
-             WHERE entity_type = :entity_type
-               AND status = :status
-             ORDER BY id ASC'
-        );
-        $stmt->execute([
-            ':entity_type' => $this->entityType,
-            ':status' => 'done',
-        ]);
 
         $states = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = (int) ($row['entity_id'] ?? 0);
+            $entityId = (int) ($row['product_id'] ?? 0);
             if ($entityId <= 0) {
                 continue;
             }
 
-            $payload = $this->decodePayload($row['payload'] ?? null);
-            $states[$entityId] = [
-                'action' => $row['action'] ?? null,
-                'hash' => $payload['hash'] ?? null,
-            ];
+            $states[$entityId] = $row;
         }
 
         return $states;
     }
 
-    private function buildPayload(array $product, array $translations, array $attributes): array
+    private function buildPayloadData(array $product, array $translations, array $attributes): array
     {
         $productPayload = [];
         foreach ($this->hashFields as $field) {
@@ -314,8 +276,13 @@ class ProductDeltaService
         return hash('sha256', $json);
     }
 
-    private function enqueue(int $entityId, string $action, array $payload): void
+    private function enqueue(int $entityId, string $action, array $payloadData, string $hash): void
     {
+        $payload = [
+            'hash' => $hash,
+            'data' => $payloadData,
+        ];
+
         $stmt = $this->stageDb->prepare(
             'INSERT INTO export_queue (entity_type, entity_id, action, payload, status, created_at)
              VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())'
@@ -329,24 +296,19 @@ class ProductDeltaService
         ]);
     }
 
-    private function hasMatchingPendingEntry(?array $pendingEntry, string $action, ?string $hash): bool
+    private function enqueueOfflineUpdate(int $entityId): void
     {
-        if ($pendingEntry === null) {
-            return false;
-        }
-
-        return ($pendingEntry['action'] ?? null) === $action
-            && ($pendingEntry['hash'] ?? null) === $hash;
-    }
-
-    private function decodePayload(mixed $payload): array
-    {
-        if (!is_string($payload) || $payload === '') {
-            return [];
-        }
-
-        $decoded = json_decode($payload, true);
-        return is_array($decoded) ? $decoded : [];
+        $stmt = $this->stageDb->prepare(
+            'INSERT INTO export_queue (entity_type, entity_id, action, payload, status, created_at)
+             VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())'
+        );
+        $stmt->execute([
+            ':entity_type' => $this->entityType,
+            ':entity_id' => $entityId,
+            ':action' => 'update',
+            ':payload' => '{"online":0}',
+            ':status' => 'pending',
+        ]);
     }
 
     private function logRecordError(int $entityId, string $message, Throwable $exception): void
