@@ -53,7 +53,7 @@ Implement Ticket `T-001` to improve pipeline status visibility in the admin UI.
 
 # Commit hash
 
-- `PENDING`
+- `5861088`
 
 # Recommended next step
 
