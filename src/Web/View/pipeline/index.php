@@ -96,6 +96,37 @@
     </div>
 </div>
 
+<div class="panel-card p-0 mb-4">
+    <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center">
+        <div>
+            <h2 class="h5 mb-0">Letzte Log-Eintraege</h2>
+            <div class="small text-secondary mt-1">Die letzten 10 Logzeilen des aktiven oder zuletzt ausgefuehrten Pipeline-Laufs.</div>
+        </div>
+        <?php if (!empty($latestRun['id'])): ?>
+            <a class="btn btn-sm btn-outline-secondary" href="/sync-runs/show?id=<?= Html::escape($latestRun['id']) ?>">Laufdetail</a>
+        <?php endif; ?>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead><tr><th>Zeit</th><th>Level</th><th>Schritt</th><th>Nachricht</th></tr></thead>
+            <tbody>
+            <?php if ($recentLogs === []): ?>
+                <tr><td colspan="4" class="text-secondary px-4 py-3">Keine Log-Eintraege vorhanden.</td></tr>
+            <?php else: ?>
+                <?php foreach ($recentLogs as $log): ?>
+                    <tr>
+                        <td><?= Html::escape($log['created_at'] ?? '-') ?></td>
+                        <td><span class="badge <?= Html::badgeClass($log['level'] ?? 'info') ?>"><?= Html::escape($log['level'] ?? 'info') ?></span></td>
+                        <td><?= Html::escape($log['run_type'] ?? '-') ?></td>
+                        <td class="truncate-cell"><?= Html::escape($log['message'] ?? '') ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4 border border-danger-subtle">
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
         <div>

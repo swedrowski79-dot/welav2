@@ -30,6 +30,8 @@ final class PipelineController extends Controller
         $page = max(1, $request->int('page', 1));
         $perPage = $this->perPage($request);
         $paginator = new Paginator($page, $perPage, $repository->countQueueEntries($filters));
+        $focusRun = $monitoringRepository->latestRunningRun();
+        $latestRun = $focusRun ?? $monitoringRepository->latestRun();
 
         return $this->render('pipeline/index', [
             'pageTitle' => 'Pipeline & Export Queue',
@@ -39,9 +41,10 @@ final class PipelineController extends Controller
             'queueEntries' => $repository->paginatedQueueEntries($filters, $paginator),
             'queueSummary' => $repository->queueSummary(),
             'stateSummary' => $repository->stateSummary(),
-            'runningRun' => $monitoringRepository->latestRunningRun(),
-            'latestRun' => $monitoringRepository->latestRun(),
+            'runningRun' => $focusRun,
+            'latestRun' => $latestRun,
             'latestError' => $monitoringRepository->latestPipelineError(),
+            'recentLogs' => $monitoringRepository->recentPipelineLogs((int) ($latestRun['id'] ?? 0), 10),
             'started' => $request->query('started') === '1',
             'resetDone' => $request->string('reset_done'),
             'errorMessage' => $request->string('error'),

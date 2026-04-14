@@ -241,6 +241,45 @@ final class MonitoringRepository
         return $this->fetchOne('SELECT * FROM sync_errors ORDER BY created_at DESC LIMIT 1');
     }
 
+    public function recentPipelineLogs(?int $runId = null, int $limit = 10): array
+    {
+        try {
+            if ($runId !== null && $runId > 0) {
+                $stmt = $this->stageDb->prepare(
+                    'SELECT l.*, r.run_type, r.status AS run_status
+                     FROM sync_logs l
+                     LEFT JOIN sync_runs r ON r.id = l.sync_run_id
+                     WHERE l.sync_run_id = :run_id
+                     ORDER BY l.created_at DESC
+                     LIMIT :limit'
+                );
+                $stmt->bindValue(':run_id', $runId, \PDO::PARAM_INT);
+                $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+                $stmt->execute();
+
+                return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            }
+
+            $stmt = $this->stageDb->prepare(
+                'SELECT l.*, r.run_type, r.status AS run_status
+                 FROM sync_logs l
+                 LEFT JOIN sync_runs r ON r.id = l.sync_run_id
+                 ORDER BY l.created_at DESC
+                 LIMIT :limit'
+            );
+            $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+            $stmt->execute();
+
+            return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return [];
+            }
+
+            throw $exception;
+        }
+    }
+
     private function isMissingTable(\PDOException $exception): bool
     {
         return (int) ($exception->errorInfo[1] ?? 0) === self::MYSQL_TABLE_NOT_FOUND;
