@@ -1,0 +1,2 @@
+ALTER TABLE stage_products
+    ADD COLUMN IF NOT EXISTS hash VARCHAR(64) NULL;
