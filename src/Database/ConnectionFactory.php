@@ -6,7 +6,11 @@ class ConnectionFactory
     {
         switch ($config['type']) {
             case 'mssql':
-                $dsn = "sqlsrv:Server={$config['connection']['host']};Database={$config['connection']['database']}";
+                $port = $config['connection']['port'] ?? 1433;
+                $server = "{$config['connection']['host']},{$port}";
+                $encrypt = $config['connection']['encrypt'] ?? true;
+                $trustServerCertificate = $config['connection']['trust_server_certificate'] ?? true;
+                $dsn = "sqlsrv:Server={$server};Database={$config['connection']['database']};Encrypt=" . ($encrypt ? 'yes' : 'no') . ";TrustServerCertificate=" . ($trustServerCertificate ? 'yes' : 'no');
                 $pdo = new PDO($dsn, $config['connection']['username'], $config['connection']['password']);
                 break;
 

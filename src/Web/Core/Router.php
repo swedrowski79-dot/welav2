@@ -6,17 +6,22 @@ namespace App\Web\Core;
 
 final class Router
 {
-    /** @var array<string, callable> */
+    /** @var array<string, array<string, callable>> */
     private array $routes = [];
 
     public function get(string $path, callable $handler): void
     {
-        $this->routes[$path] = $handler;
+        $this->routes['GET'][$path] = $handler;
+    }
+
+    public function post(string $path, callable $handler): void
+    {
+        $this->routes['POST'][$path] = $handler;
     }
 
     public function dispatch(Request $request): void
     {
-        $handler = $this->routes[$request->path()] ?? null;
+        $handler = $this->routes[$request->method()][$request->path()] ?? null;
 
         if ($handler === null) {
             Response::html('<h1>404</h1><p>Seite nicht gefunden.</p>', 404);

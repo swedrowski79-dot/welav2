@@ -1,0 +1,13 @@
+<?php
+
+return [
+    'api_key' => '64e6bc10686640bd76247f599a82a456dd0a38fdd8fbaa9dc9f7cdd50e67eeaa',
+    'db' => [
+        'host' => '127.0.0.1',
+        'port' => 3306,
+        'database' => 'shop2',
+        'username' => 'shop',
+        'password' => 'change-me',
+        'charset' => 'utf8mb4',
+    ],
+];

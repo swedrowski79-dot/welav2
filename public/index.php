@@ -22,11 +22,13 @@ $stageBrowserController = new StageBrowserController();
 $router->get('/', new DashboardController());
 $router->get('/sync-runs', [$syncRunController, 'index']);
 $router->get('/sync-runs/show', [$syncRunController, 'show']);
+$router->post('/sync-runs/start', [$syncRunController, 'start']);
 $router->get('/logs', new LogController());
 $router->get('/errors', [$errorController, 'index']);
 $router->get('/errors/show', [$errorController, 'show']);
 $router->get('/stage-browser', [$stageBrowserController, 'index']);
 $router->get('/stage-browser/show', [$stageBrowserController, 'show']);
 $router->get('/status', new StatusController());
+$router->post('/status/save', [new StatusController(), 'save']);
 
 $router->dispatch($request);

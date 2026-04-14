@@ -13,6 +13,7 @@ final class SourceStatusRepository
         return [
             'afs' => $this->checkConnection('AFS', $sources['afs']),
             'extra' => $this->checkSqlite($sources['extra']),
+            'xt' => $this->checkXtApi($sources['xt']),
             'stage' => $this->checkConnection('Stage', $sources['stage']),
         ];
     }
@@ -50,5 +51,28 @@ final class SourceStatusRepository
         }
 
         return $this->checkConnection('Extra SQLite', $config);
+    }
+
+    private function checkXtApi(array $config): array
+    {
+        try {
+            $client = new XtApiClient(
+                (string) ($config['connection']['url'] ?? ''),
+                (string) ($config['connection']['key'] ?? '')
+            );
+            $response = $client->health();
+
+            return [
+                'label' => 'XT',
+                'status' => 'reachable',
+                'message' => (string) ($response['message'] ?? 'XT-API erreichbar.'),
+            ];
+        } catch (\Throwable $exception) {
+            return [
+                'label' => 'XT',
+                'status' => 'unreachable',
+                'message' => $exception->getMessage(),
+            ];
+        }
     }
 }

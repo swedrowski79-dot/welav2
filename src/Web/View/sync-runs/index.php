@@ -1,5 +1,36 @@
 <?php use App\Web\Core\Html; ?>
 
+<?php if (!empty($started)): ?>
+    <div class="alert alert-success border-0 shadow-sm">Sync-Job wurde gestartet und laeuft im Hintergrund.</div>
+<?php endif; ?>
+
+<?php if (!empty($errorMessage)): ?>
+    <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
+<?php endif; ?>
+
+<div class="panel-card p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end">
+        <div>
+            <h2 class="h5 mb-1">Sync starten</h2>
+            <div class="text-secondary small">Import, Merge und Expand koennen direkt aus der Oberflaeche gestartet werden.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="import_all">
+                <button class="btn btn-primary" type="submit">Import starten</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="merge">
+                <button class="btn btn-outline-primary" type="submit">Merge starten</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="expand">
+                <button class="btn btn-outline-secondary" type="submit">Expand starten</button>
+            </form>
+        </div>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4">
     <form class="row g-3" method="get" action="/sync-runs">
         <div class="col-12 col-md-4">

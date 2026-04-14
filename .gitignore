@@ -1,0 +1,4 @@
+data/*.sqlite
+data/*.db
+.env
+wela-api/config.php

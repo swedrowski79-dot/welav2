@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Web\Controller;
 
 use App\Web\Core\Controller;
+use App\Web\Core\Html;
 use App\Web\Core\Paginator;
 use App\Web\Core\Request;
+use App\Web\Core\Response;
 use App\Web\Repository\MonitoringRepository;
 use App\Web\Repository\StageConnection;
+use App\Web\Repository\SyncLauncher;
 
 final class SyncRunController extends Controller
 {
@@ -30,6 +33,8 @@ final class SyncRunController extends Controller
             'runs' => $repository->paginatedRuns($filters, $paginator),
             'filters' => $filters,
             'paginator' => $paginator,
+            'started' => $request->query('started') === '1',
+            'errorMessage' => $request->string('error'),
             'currentPath' => $request->path(),
         ]);
     }
@@ -48,5 +53,17 @@ final class SyncRunController extends Controller
             'errors' => $run ? $repository->runErrors($id) : [],
             'currentPath' => '/sync-runs',
         ]);
+    }
+
+    public function start(Request $request): void
+    {
+        $job = $request->postString('job');
+
+        try {
+            (new SyncLauncher())->launch($job);
+            Response::redirect(Html::buildUrl('/sync-runs', ['started' => 1]));
+        } catch (\Throwable $exception) {
+            Response::redirect(Html::buildUrl('/sync-runs', ['error' => $exception->getMessage()]));
+        }
     }
 }
