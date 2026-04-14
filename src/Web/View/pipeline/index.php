@@ -57,6 +57,8 @@
             <div class="d-flex flex-wrap gap-2">
                 <?php foreach ([
                     ['job' => 'import_all', 'label' => 'Run Import', 'class' => 'btn-primary'],
+                    ['job' => 'import_products', 'label' => 'Run Product Import', 'class' => 'btn-outline-primary'],
+                    ['job' => 'import_categories', 'label' => 'Run Category Import', 'class' => 'btn-outline-primary'],
                     ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary'],
                     ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary'],
                     ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark'],

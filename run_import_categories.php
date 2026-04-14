@@ -11,4 +11,4 @@ require __DIR__ . '/src/Importer/ExtraImporter.php';
 $configSources = require __DIR__ . '/config/sources.php';
 $configNormalize = require __DIR__ . '/config/normalize.php';
 
-(new ImportWorkflow($configSources, $configNormalize))->runAll();
+(new ImportWorkflow($configSources, $configNormalize))->runCategories();

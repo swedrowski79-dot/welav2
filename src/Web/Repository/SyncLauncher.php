@@ -8,6 +8,8 @@ final class SyncLauncher
 {
     private const COMMANDS = [
         'import_all' => 'php /app/run_import_all.php',
+        'import_products' => 'php /app/run_import_products.php',
+        'import_categories' => 'php /app/run_import_categories.php',
         'merge' => 'php /app/run_merge.php',
         'expand' => 'php /app/run_expand.php',
         'delta' => 'php /app/run_delta.php',

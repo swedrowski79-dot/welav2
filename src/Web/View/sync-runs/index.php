@@ -20,6 +20,14 @@
                 <button class="btn btn-primary" type="submit">Import starten</button>
             </form>
             <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="import_products">
+                <button class="btn btn-outline-primary" type="submit">Produkt-Import</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="import_categories">
+                <button class="btn btn-outline-primary" type="submit">Kategorie-Import</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
                 <input type="hidden" name="job" value="merge">
                 <button class="btn btn-outline-primary" type="submit">Merge starten</button>
             </form>
