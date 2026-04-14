@@ -2,6 +2,7 @@
 
 return [
     'expand' => [
+        'insert_batch_size' => 500,
         'product_attributes_from_translations' => [
             'source' => 'stage_product_translations',
             'target' => 'stage_attribute_translations',

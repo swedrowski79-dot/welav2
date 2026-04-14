@@ -2,10 +2,14 @@
 
 class ExpandService
 {
+    private int $insertBatchSize;
+
     public function __construct(
         private PDO $stageDb,
         private array $expandConfig
     ) {
+        $definitions = $this->expandConfig['expand'] ?? [];
+        $this->insertBatchSize = max(1, (int) ($definitions['insert_batch_size'] ?? 500));
     }
 
     public function run(): void
@@ -15,6 +19,8 @@ class ExpandService
         if (!is_array($definitions) || $definitions === []) {
             throw new RuntimeException('Expand config is missing or empty.');
         }
+
+        unset($definitions['insert_batch_size']);
 
         foreach ($definitions as $definitionName => $definition) {
             if (!is_array($definition)) {
@@ -46,25 +52,7 @@ class ExpandService
         $this->stageDb->exec("TRUNCATE TABLE `{$targetTable}`");
 
         $select = $this->stageDb->query("SELECT * FROM `{$sourceTable}`");
-        $insert = $this->stageDb->prepare(
-            "INSERT INTO `{$targetTable}` (
-                `afs_artikel_id`,
-                `sku`,
-                `language_code`,
-                `sort_order`,
-                `attribute_name`,
-                `attribute_value`,
-                `source_directory`
-            ) VALUES (
-                :afs_artikel_id,
-                :sku,
-                :language_code,
-                :sort_order,
-                :attribute_name,
-                :attribute_value,
-                :source_directory
-            )"
-        );
+        $batch = [];
 
         while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
             foreach ($slots as $slotIndex => $slot) {
@@ -103,7 +91,7 @@ class ExpandService
                     continue;
                 }
 
-                $insert->execute([
+                $batch[] = [
                     'afs_artikel_id' => $row['afs_artikel_id'] ?? null,
                     'sku' => $row['sku'] ?? null,
                     'language_code' => $row['language_code'] ?? null,
@@ -111,8 +99,17 @@ class ExpandService
                     'attribute_name' => $attributeName,
                     'attribute_value' => $attributeValue,
                     'source_directory' => $row['source_directory'] ?? null,
-                ]);
+                ];
+
+                if (count($batch) >= $this->insertBatchSize) {
+                    $this->insertRows($targetTable, $batch);
+                    $batch = [];
+                }
             }
+        }
+
+        if ($batch !== []) {
+            $this->insertRows($targetTable, $batch);
         }
     }
 
@@ -125,5 +122,32 @@ class ExpandService
         $normalized = trim((string) $value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function insertRows(string $table, array $rows): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        $columns = array_keys($rows[0]);
+        $valueGroups = [];
+        $params = [];
+
+        foreach ($rows as $rowIndex => $row) {
+            $placeholders = [];
+
+            foreach ($columns as $column) {
+                $placeholder = ':' . $column . '_' . $rowIndex;
+                $placeholders[] = $placeholder;
+                $params[$placeholder] = $row[$column] ?? null;
+            }
+
+            $valueGroups[] = '(' . implode(',', $placeholders) . ')';
+        }
+
+        $sql = "INSERT INTO `{$table}` (`" . implode('`,`', $columns) . "`) VALUES " . implode(',', $valueGroups);
+        $stmt = $this->stageDb->prepare($sql);
+        $stmt->execute($params);
     }
 }

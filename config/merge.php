@@ -2,6 +2,7 @@
 
 return [
     'merge' => [
+        'insert_batch_size' => 250,
 
         'stage_products' => [
             'base' => 'raw_afs_articles',
