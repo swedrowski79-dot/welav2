@@ -229,9 +229,13 @@ CREATE TABLE IF NOT EXISTS export_queue (
     action VARCHAR(20) NOT NULL,
     payload JSON NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    claim_token VARCHAR(64) NULL,
+    claimed_at DATETIME NULL,
     created_at DATETIME NOT NULL,
     KEY idx_export_queue_entity (entity_type, entity_id),
     KEY idx_export_queue_status (status),
+    KEY idx_export_queue_claim_token (claim_token),
+    KEY idx_export_queue_claimed_at (claimed_at),
     KEY idx_export_queue_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

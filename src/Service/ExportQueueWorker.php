@@ -9,6 +9,7 @@ final class ExportQueueWorker
     private string $entityType;
     private string $stateHashField;
     private string $offlineHash;
+    private int $workerBatchSize;
 
     public function __construct(
         private PDO $stageDb,
@@ -23,12 +24,14 @@ final class ExportQueueWorker
         $this->entityType = (string) ($config['entity_type'] ?? 'product');
         $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
         $this->offlineHash = hash('sha256', (string) ($config['offline_hash_value'] ?? 'offline'));
+        $this->workerBatchSize = max(1, (int) ($config['worker_batch_size'] ?? 100));
     }
 
-    public function run(int $limit = 100): array
+    public function run(?int $limit = null): array
     {
-        $entries = $this->pendingEntries($limit);
+        $entries = $this->claimPendingEntries($limit ?? $this->workerBatchSize);
         $stats = [
+            'claimed' => count($entries),
             'processed' => 0,
             'done' => 0,
             'error' => 0,
@@ -45,14 +48,19 @@ final class ExportQueueWorker
             try {
                 $confirmedHash = $this->confirmedHash($entry);
                 $entityId = (int) ($entry['entity_id'] ?? 0);
+                $claimToken = (string) ($entry['claim_token'] ?? '');
 
                 if ($entityId <= 0) {
                     throw new RuntimeException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
                 }
 
+                if ($claimToken === '') {
+                    throw new RuntimeException('Queue-Eintrag wurde nicht korrekt geclaimt.');
+                }
+
                 $this->stageDb->beginTransaction();
 
-                $this->markDone($queueId);
+                $this->markDone($queueId, $claimToken);
                 $this->updateConfirmedState($entityId, $confirmedHash);
 
                 $this->stageDb->commit();
@@ -62,7 +70,7 @@ final class ExportQueueWorker
                     $this->stageDb->rollBack();
                 }
 
-                $this->markError($queueId, $exception->getMessage());
+                $this->markError($queueId, (string) ($entry['claim_token'] ?? ''), $exception->getMessage());
                 $stats['error']++;
             }
         }
@@ -74,19 +82,76 @@ final class ExportQueueWorker
         return $stats;
     }
 
-    private function pendingEntries(int $limit): array
+    private function claimPendingEntries(int $limit): array
     {
+        $claimToken = bin2hex(random_bytes(16));
+
+        $this->stageDb->beginTransaction();
+
+        try {
+            $stmt = $this->stageDb->prepare(
+                "SELECT id
+                 FROM `{$this->queueTable}`
+                 WHERE status = :status AND entity_type = :entity_type
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT :limit
+                 FOR UPDATE"
+            );
+            $stmt->bindValue(':status', 'pending');
+            $stmt->bindValue(':entity_type', $this->entityType);
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $queueIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+            if ($queueIds === []) {
+                $this->stageDb->commit();
+
+                return [];
+            }
+
+            $placeholders = [];
+            $params = [
+                ':claim_token' => $claimToken,
+                ':processing_status' => 'processing',
+            ];
+
+            foreach ($queueIds as $index => $queueId) {
+                $placeholder = ':id_' . $index;
+                $placeholders[] = $placeholder;
+                $params[$placeholder] = $queueId;
+            }
+
+            $claimSql = sprintf(
+                "UPDATE `%s`
+                 SET status = :processing_status,
+                     claim_token = :claim_token,
+                     claimed_at = NOW()
+                 WHERE id IN (%s)",
+                $this->queueTable,
+                implode(', ', $placeholders)
+            );
+
+            $claimStmt = $this->stageDb->prepare($claimSql);
+            $claimStmt->execute($params);
+            $this->stageDb->commit();
+        } catch (Throwable $exception) {
+            if ($this->stageDb->inTransaction()) {
+                $this->stageDb->rollBack();
+            }
+
+            throw $exception;
+        }
+
         $stmt = $this->stageDb->prepare(
-            "SELECT id, entity_type, entity_id, action, payload, status, created_at
+            "SELECT id, entity_type, entity_id, action, payload, status, claim_token, claimed_at, created_at
              FROM `{$this->queueTable}`
-             WHERE status = :status AND entity_type = :entity_type
-             ORDER BY created_at ASC, id ASC
-             LIMIT :limit"
+             WHERE claim_token = :claim_token
+             ORDER BY claimed_at ASC, id ASC"
         );
-        $stmt->bindValue(':status', 'pending');
-        $stmt->bindValue(':entity_type', $this->entityType);
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute([
+            ':claim_token' => $claimToken,
+        ]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -112,26 +177,38 @@ final class ExportQueueWorker
         return $hash;
     }
 
-    private function markDone(int $queueId): void
+    private function markDone(int $queueId, string $claimToken): void
     {
         $stmt = $this->stageDb->prepare(
-            "UPDATE `{$this->queueTable}` SET status = :status WHERE id = :id"
+            "UPDATE `{$this->queueTable}`
+             SET status = :status,
+                 claim_token = NULL
+             WHERE id = :id AND claim_token = :claim_token"
         );
         $stmt->execute([
             ':status' => 'done',
             ':id' => $queueId,
+            ':claim_token' => $claimToken,
         ]);
+
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Queue-Eintrag konnte nicht als verarbeitet bestaetigt werden.');
+        }
     }
 
-    private function markError(int $queueId, string $message): void
+    private function markError(int $queueId, string $claimToken, string $message): void
     {
-        if ($queueId > 0) {
+        if ($queueId > 0 && $claimToken !== '') {
             $stmt = $this->stageDb->prepare(
-                "UPDATE `{$this->queueTable}` SET status = :status WHERE id = :id"
+                "UPDATE `{$this->queueTable}`
+                 SET status = :status,
+                     claim_token = NULL
+                 WHERE id = :id AND claim_token = :claim_token"
             );
             $stmt->execute([
                 ':status' => 'error',
                 ':id' => $queueId,
+                ':claim_token' => $claimToken,
             ]);
         }
 
