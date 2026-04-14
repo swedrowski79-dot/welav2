@@ -64,6 +64,21 @@ $envInt = static function (string $name, int $default) use ($env): int {
     return (int) $env($name, (string) $default);
 };
 
+$qualifiedAfsTable = static function (string $tableName) use ($env): string {
+    $schema = trim($env('AFS_DB_SCHEMA', 'dbo'));
+    $table = trim($tableName);
+
+    if ($table === '') {
+        return $table;
+    }
+
+    if ($schema === '' || str_contains($table, '.')) {
+        return $table;
+    }
+
+    return $schema . '.' . $table;
+};
+
 $detectExtraPath = static function () use ($projectRoot): string {
     $explicit = getenv('EXTRA_SQLITE_PATH');
     if ($explicit !== false && $explicit !== '') {
@@ -100,9 +115,9 @@ return [
                 'encrypt' => true,
                 'trust_server_certificate' => true,
             ],
-            'entities' => [
+                'entities' => [
                 'articles' => [
-                    'table' => 'Artikel',
+                    'table' => $qualifiedAfsTable($env('AFS_ARTICLES_TABLE', 'Artikel')),
                     'columns' => [
                         'Artikel',
                         'Art',
@@ -150,7 +165,7 @@ return [
                     ],
                 ],
                 'categories' => [
-                    'table' => 'Warengruppen',
+                    'table' => $qualifiedAfsTable($env('AFS_CATEGORIES_TABLE', 'Warengruppe')),
                     'columns' => [
                         'Warengruppe',
                         'Art',
@@ -164,7 +179,7 @@ return [
                     ],
                 ],
                 'documents' => [
-                    'table' => 'Dokumente',
+                    'table' => $qualifiedAfsTable($env('AFS_DOCUMENTS_TABLE', 'Dokumente')),
                     'columns' => [
                         'Dokument',
                         'Artikel',

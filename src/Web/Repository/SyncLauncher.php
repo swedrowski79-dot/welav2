@@ -23,7 +23,7 @@ final class SyncLauncher
         }
 
         $logFile = '/tmp/' . $job . '.log';
-        $backgroundCommand = sprintf('%s > %s 2>&1 &', $command, escapeshellarg($logFile));
+        $backgroundCommand = sprintf('(%s) > %s 2>&1 < /dev/null &', $command, escapeshellarg($logFile));
 
         exec($backgroundCommand, $output, $exitCode);
 
