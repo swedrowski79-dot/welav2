@@ -40,6 +40,10 @@
                 <button class="btn btn-outline-dark" type="submit">Delta starten</button>
             </form>
             <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="export_queue_worker">
+                <button class="btn btn-outline-dark" type="submit">Export Worker</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
                 <input type="hidden" name="job" value="full_pipeline">
                 <button class="btn btn-dark" type="submit">Full Pipeline</button>
             </form>

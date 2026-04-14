@@ -62,6 +62,7 @@
                     ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary'],
                     ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary'],
                     ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark'],
+                    ['job' => 'export_queue_worker', 'label' => 'Run Export Worker', 'class' => 'btn-outline-dark'],
                     ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark'],
                 ] as $job): ?>
                     <form method="post" action="/pipeline/start">

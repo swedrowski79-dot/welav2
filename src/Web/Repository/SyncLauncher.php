@@ -13,6 +13,7 @@ final class SyncLauncher
         'merge' => 'php /app/run_merge.php',
         'expand' => 'php /app/run_expand.php',
         'delta' => 'php /app/run_delta.php',
+        'export_queue_worker' => 'php /app/run_export_queue.php',
         'full_pipeline' => 'php /app/run_import_all.php && php /app/run_merge.php && php /app/run_expand.php',
     ];
 

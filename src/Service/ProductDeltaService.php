@@ -61,10 +61,9 @@ class ProductDeltaService
             "UPDATE `{$this->stageTable}` SET `{$this->hashField}` = :hash WHERE `{$this->identityField}` = :entity_id"
         );
         $upsertStateStmt = $this->stageDb->prepare(
-            "INSERT INTO `{$this->stateTable}` (`product_id`, `{$this->stateHashField}`, `{$this->stateLastSeenField}`)
-             VALUES (:product_id, :hash, :last_seen_at)
+            "INSERT INTO `{$this->stateTable}` (`product_id`, `{$this->stateLastSeenField}`)
+             VALUES (:product_id, :last_seen_at)
              ON DUPLICATE KEY UPDATE
-                `{$this->stateHashField}` = VALUES(`{$this->stateHashField}`),
                 `{$this->stateLastSeenField}` = VALUES(`{$this->stateLastSeenField}`)"
         );
         $markOfflineStateStmt = $this->stageDb->prepare(
@@ -108,7 +107,6 @@ class ProductDeltaService
 
                 $upsertStateStmt->execute([
                     ':product_id' => $entityId,
-                    ':hash' => $hash,
                     ':last_seen_at' => $runTimestamp,
                 ]);
             } catch (Throwable $exception) {
@@ -283,6 +281,10 @@ class ProductDeltaService
             'data' => $payloadData,
         ];
 
+        if ($this->hasPendingEntry($entityId, $action, $payload)) {
+            return;
+        }
+
         $stmt = $this->stageDb->prepare(
             'INSERT INTO export_queue (entity_type, entity_id, action, payload, status, created_at)
              VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())'
@@ -298,6 +300,12 @@ class ProductDeltaService
 
     private function enqueueOfflineUpdate(int $entityId): void
     {
+        $payload = ['online' => 0];
+
+        if ($this->hasPendingEntry($entityId, 'update', $payload)) {
+            return;
+        }
+
         $stmt = $this->stageDb->prepare(
             'INSERT INTO export_queue (entity_type, entity_id, action, payload, status, created_at)
              VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())'
@@ -306,9 +314,32 @@ class ProductDeltaService
             ':entity_type' => $this->entityType,
             ':entity_id' => $entityId,
             ':action' => 'update',
-            ':payload' => '{"online":0}',
+            ':payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ':status' => 'pending',
         ]);
+    }
+
+    private function hasPendingEntry(int $entityId, string $action, array $payload): bool
+    {
+        $stmt = $this->stageDb->prepare(
+            'SELECT id
+             FROM export_queue
+             WHERE entity_type = :entity_type
+               AND entity_id = :entity_id
+               AND action = :action
+               AND status = :status
+               AND payload = :payload
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':entity_type' => $this->entityType,
+            ':entity_id' => $entityId,
+            ':action' => $action,
+            ':status' => 'pending',
+            ':payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+
+        return (bool) $stmt->fetchColumn();
     }
 
     private function logRecordError(int $entityId, string $message, Throwable $exception): void
