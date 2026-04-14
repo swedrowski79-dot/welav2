@@ -25,11 +25,13 @@ final class ErrorController extends Controller
         $paginator = new Paginator($page, $perPage, $repository->countErrors($filters));
 
         return $this->render('errors/index', [
-            'pageTitle' => 'Fehler',
-            'pageSubtitle' => 'Offene und historische Fehler mit Detailansicht.',
+            'pageTitle' => 'Monitoring Fehler',
+            'pageSubtitle' => 'Fehlerfaelle mit Ursache, Details und Laufbezug.',
             'errors' => $repository->paginatedErrors($filters, $paginator),
             'filters' => $filters,
             'paginator' => $paginator,
+            'resetDone' => $request->string('reset_done'),
+            'errorMessage' => $request->string('error'),
             'currentPath' => $request->path(),
         ]);
     }

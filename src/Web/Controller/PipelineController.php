@@ -106,7 +106,12 @@ final class PipelineController extends Controller
     {
         $action = $request->postString('action');
         $confirmed = $request->postString('confirmed') === 'yes';
-        $redirectPath = in_array($action, ['logs', 'errors', 'runs'], true) ? '/logs' : '/pipeline';
+        $redirectPath = match ($action) {
+            'logs' => '/logs',
+            'errors' => '/errors',
+            'runs' => '/sync-runs',
+            default => '/pipeline',
+        };
 
         if (!$confirmed) {
             Response::redirect(Html::buildUrl($redirectPath, ['error' => 'Reset nicht bestaetigt.']));

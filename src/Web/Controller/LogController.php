@@ -25,8 +25,8 @@ final class LogController extends Controller
         $paginator = new Paginator($page, $perPage, $repository->countLogs($filters));
 
         return $this->render('logs/index', [
-            'pageTitle' => 'Logs',
-            'pageSubtitle' => 'Protokolleintraege aus den Sync-Laeufen.',
+            'pageTitle' => 'Monitoring Logs',
+            'pageSubtitle' => 'Alle Protokolleintraege aus den Sync-Laeufen.',
             'logs' => $repository->paginatedLogs($filters, $paginator),
             'filters' => $filters,
             'paginator' => $paginator,

@@ -8,6 +8,24 @@
     <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
 <?php endif; ?>
 
+<?php if (!empty($resetDone)): ?>
+    <div class="alert alert-warning border-0 shadow-sm">Reset-Aktion `<?= Html::escape($resetDone) ?>` wurde ausgefuehrt und in den Logs vermerkt.</div>
+<?php endif; ?>
+
+<div class="panel-card p-4 mb-4 border border-danger-subtle">
+    <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
+        <div>
+            <h2 class="h5 mb-1 text-danger">Laufhistorie-Reset</h2>
+            <div class="text-secondary small">Achtung: Diese Aktion entfernt die komplette Sync-Laufhistorie. Logs und Fehler bleiben davon getrennt.</div>
+        </div>
+        <form method="post" action="/pipeline/reset" onsubmit="return confirm('Die komplette Sync-Laufhistorie wird geloescht. Fortfahren?');">
+            <input type="hidden" name="action" value="runs">
+            <input type="hidden" name="confirmed" value="yes">
+            <button class="btn btn-outline-danger" type="submit">Reset Runs</button>
+        </form>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4">
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end">
         <div>

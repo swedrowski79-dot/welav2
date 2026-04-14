@@ -1,5 +1,37 @@
 <?php use App\Web\Core\Html; ?>
 
+<?php if (!empty($resetDone)): ?>
+    <div class="alert alert-warning border-0 shadow-sm">Reset-Aktion `<?= Html::escape($resetDone) ?>` wurde ausgefuehrt und in den Logs vermerkt.</div>
+<?php endif; ?>
+
+<?php if (!empty($errorMessage)): ?>
+    <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
+<?php endif; ?>
+
+<div class="panel-card p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+        <div>
+            <h2 class="h5 mb-1">Fehler vs. Logs</h2>
+            <div class="text-secondary small">Diese Ansicht zeigt nur Fehlerdatensaetze mit Details. Fuer komplette Laufprotokolle inklusive Info- und Warnmeldungen gibt es die Logansicht.</div>
+        </div>
+        <a class="btn btn-outline-secondary" href="/logs">Zur Logansicht</a>
+    </div>
+</div>
+
+<div class="panel-card p-4 mb-4 border border-danger-subtle">
+    <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
+        <div>
+            <h2 class="h5 mb-1 text-danger">Fehler-Reset</h2>
+            <div class="text-secondary small">Achtung: Diese Aktion entfernt alle Sync-Fehlerdatensaetze. Vor dem Reset ist eine Bestaetigung erforderlich.</div>
+        </div>
+        <form method="post" action="/pipeline/reset" onsubmit="return confirm('Alle Sync-Fehler werden geloescht. Fortfahren?');">
+            <input type="hidden" name="action" value="errors">
+            <input type="hidden" name="confirmed" value="yes">
+            <button class="btn btn-outline-danger" type="submit">Reset Errors</button>
+        </form>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4">
     <form class="row g-3" method="get" action="/errors">
         <div class="col-12 col-md-5">

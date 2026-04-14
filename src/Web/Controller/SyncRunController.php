@@ -28,12 +28,13 @@ final class SyncRunController extends Controller
         $paginator = new Paginator($page, $perPage, $repository->countRuns($filters));
 
         return $this->render('sync-runs/index', [
-            'pageTitle' => 'Sync-Laeufe',
+            'pageTitle' => 'Monitoring Laeufe',
             'pageSubtitle' => 'Laufhistorie mit Status, Mengen und Dauer.',
             'runs' => $repository->paginatedRuns($filters, $paginator),
             'filters' => $filters,
             'paginator' => $paginator,
             'started' => $request->query('started') === '1',
+            'resetDone' => $request->string('reset_done'),
             'errorMessage' => $request->string('error'),
             'currentPath' => $request->path(),
         ]);

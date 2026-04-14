@@ -7,9 +7,9 @@ $appName = $adminConfig['app_name'];
 $navigation = [
     '/' => 'Dashboard',
     '/pipeline' => 'Pipeline',
-    '/sync-runs' => 'Sync-Laeufe',
-    '/logs' => 'Logs',
-    '/errors' => 'Fehler',
+    '/sync-runs' => 'Monitoring Laeufe',
+    '/logs' => 'Monitoring Logs',
+    '/errors' => 'Monitoring Fehler',
     '/stage-browser' => 'Stage-Browser',
     '/status' => 'Konfiguration/Status',
 ];

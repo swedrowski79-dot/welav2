@@ -8,6 +8,16 @@
     <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
 <?php endif; ?>
 
+<div class="panel-card p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+        <div>
+            <h2 class="h5 mb-1">Logs vs. Fehler</h2>
+            <div class="text-secondary small">Logs enthalten alle Info-, Warn- und Fehlermeldungen. Fuer konkrete Problemfaelle mit Details und Datensatzbezug ist die Fehleransicht gedacht.</div>
+        </div>
+        <a class="btn btn-outline-danger" href="/errors">Zur Fehleransicht</a>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4 border border-danger-subtle">
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
         <div>
@@ -17,7 +27,6 @@
         <div class="d-flex flex-wrap gap-2">
             <?php foreach ([
                 ['action' => 'logs', 'label' => 'Reset Logs', 'warning' => 'Alle Sync-Logs werden geloescht. Fortfahren?'],
-                ['action' => 'errors', 'label' => 'Reset Errors', 'warning' => 'Alle Sync-Fehler werden geloescht. Fortfahren?'],
                 ['action' => 'runs', 'label' => 'Reset Runs', 'warning' => 'Die komplette Sync-Laufhistorie wird geloescht. Fortfahren?'],
             ] as $reset): ?>
                 <form method="post" action="/pipeline/reset" onsubmit="return confirm('<?= Html::escape($reset['warning']) ?>');">
