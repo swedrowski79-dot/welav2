@@ -3,9 +3,11 @@
 require __DIR__ . '/src/Database/ConnectionFactory.php';
 require __DIR__ . '/src/Monitoring/SyncMonitor.php';
 require __DIR__ . '/src/Service/ExpandService.php';
+require __DIR__ . '/src/Service/ProductDeltaService.php';
 
 $configSources = require __DIR__ . '/config/sources.php';
 $configExpand = require __DIR__ . '/config/expand.php';
+$configDelta = require __DIR__ . '/config/delta.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
 
@@ -18,15 +20,21 @@ $runId = $monitor->start('expand', [
 try {
     $monitor->log($runId, 'info', 'Expand gestartet.');
     $expandService->run();
+    $deltaService = new ProductDeltaService($stageDb, $configDelta, $monitor, $runId);
+    $deltaStats = $deltaService->run();
 
     $expandedRecords = (int) $stageDb->query('SELECT COUNT(*) FROM `stage_attribute_translations`')->fetchColumn();
 
     $monitor->finish($runId, 'success', [
         'merged_records' => $expandedRecords,
-        'context' => ['table' => 'stage_attribute_translations'],
-    ], 'Expand abgeschlossen.');
+        'error_count' => (int) ($deltaStats['errors'] ?? 0),
+        'context' => [
+            'table' => 'stage_attribute_translations',
+            'delta' => $deltaStats,
+        ],
+    ], 'Expand inklusive Produkt-Delta abgeschlossen.');
 
-    echo "Expand abgeschlossen.\n";
+    echo "Expand inklusive Produkt-Delta abgeschlossen.\n";
 } catch (Throwable $exception) {
     $monitor->log($runId, 'error', 'Expand fehlgeschlagen.', [
         'exception' => $exception->getMessage(),

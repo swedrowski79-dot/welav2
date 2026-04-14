@@ -1,6 +1,39 @@
 <?php
 
 return [
+    'product_export_queue' => [
+        'entity_type' => 'product',
+        'stage_table' => 'stage_products',
+        'translation_table' => 'stage_product_translations',
+        'attribute_table' => 'stage_attribute_translations',
+        'identity_field' => 'afs_artikel_id',
+        'hash_field' => 'hash',
+        'last_exported_hash_field' => 'last_exported_hash',
+        'hash_fields' => [
+            'afs_artikel_id',
+            'sku',
+            'name_default',
+            'description_default',
+            'short_description_default',
+            'ean',
+            'stock',
+            'price',
+            'weight',
+            'category_afs_id',
+            'category_name',
+            'tax_rate',
+            'unit',
+            'min_qty',
+            'variant_flag',
+            'product_type',
+            'is_master',
+            'is_slave',
+            'is_standard',
+            'master_sku',
+            'online_flag',
+        ],
+    ],
+
     'delta' => [
         'products' => [
             'stage_table' => 'stage_products',

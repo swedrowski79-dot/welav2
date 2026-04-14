@@ -14,5 +14,6 @@ return [
         'stage_categories' => 'Stage Kategorien',
         'stage_category_translations' => 'Stage Kategorie-Uebersetzungen',
         'stage_attribute_translations' => 'Stage Attribut-Uebersetzungen',
+        'export_queue' => 'Export Queue',
     ],
 ];
