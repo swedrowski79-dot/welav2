@@ -9,6 +9,7 @@ use App\Web\Core\Html;
 use App\Web\Core\Paginator;
 use App\Web\Core\Request;
 use App\Web\Core\Response;
+use App\Web\Repository\MonitoringRepository;
 use App\Web\Repository\PipelineAdminRepository;
 use App\Web\Repository\StageConnection;
 use App\Web\Repository\SyncLauncher;
@@ -17,7 +18,9 @@ final class PipelineController extends Controller
 {
     public function index(Request $request): string
     {
-        $repository = new PipelineAdminRepository(StageConnection::make(), \web_config('admin'));
+        $stageDb = StageConnection::make();
+        $repository = new PipelineAdminRepository($stageDb, \web_config('admin'));
+        $monitoringRepository = new MonitoringRepository($stageDb);
         $filters = [
             'entity_type' => $request->string('entity_type'),
             'status' => $request->string('status'),
@@ -36,6 +39,9 @@ final class PipelineController extends Controller
             'queueEntries' => $repository->paginatedQueueEntries($filters, $paginator),
             'queueSummary' => $repository->queueSummary(),
             'stateSummary' => $repository->stateSummary(),
+            'runningRun' => $monitoringRepository->latestRunningRun(),
+            'latestRun' => $monitoringRepository->latestRun(),
+            'latestError' => $monitoringRepository->latestPipelineError(),
             'started' => $request->query('started') === '1',
             'resetDone' => $request->string('reset_done'),
             'errorMessage' => $request->string('error'),
@@ -90,6 +96,9 @@ final class PipelineController extends Controller
                 'queue' => $repository->resetQueue(),
                 'stage' => $repository->resetStageTables(),
                 'delta_state' => $repository->resetDeltaState(),
+                'logs' => $repository->resetLogs(),
+                'errors' => $repository->resetErrors(),
+                'runs' => $repository->resetRunsHistory(),
                 'full' => $repository->fullReset(),
                 default => throw new \InvalidArgumentException('Unbekannte Reset-Aktion: ' . $action),
             };

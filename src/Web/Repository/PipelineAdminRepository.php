@@ -171,6 +171,33 @@ final class PipelineAdminRepository
         ], 'warning');
     }
 
+    public function resetLogs(): void
+    {
+        $deleted = $this->stageDb->exec('DELETE FROM `sync_logs`');
+        $this->logAdminAction('Sync-Logs wurden geleert.', [
+            'action' => 'reset_logs',
+            'deleted_rows' => (int) $deleted,
+        ], 'warning');
+    }
+
+    public function resetErrors(): void
+    {
+        $deleted = $this->stageDb->exec('DELETE FROM `sync_errors`');
+        $this->logAdminAction('Sync-Fehler wurden geleert.', [
+            'action' => 'reset_errors',
+            'deleted_rows' => (int) $deleted,
+        ], 'warning');
+    }
+
+    public function resetRunsHistory(): void
+    {
+        $deleted = $this->stageDb->exec('DELETE FROM `sync_runs`');
+        $this->logAdminAction('Sync-Laufhistorie wurde geleert.', [
+            'action' => 'reset_runs',
+            'deleted_rows' => (int) $deleted,
+        ], 'warning');
+    }
+
     public function fullReset(): void
     {
         $this->resetQueue();

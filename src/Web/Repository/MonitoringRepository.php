@@ -226,9 +226,40 @@ final class MonitoringRepository
         }
     }
 
+    public function latestRunningRun(): ?array
+    {
+        return $this->fetchOne('SELECT * FROM sync_runs WHERE status = "running" ORDER BY started_at DESC LIMIT 1');
+    }
+
+    public function latestRun(): ?array
+    {
+        return $this->fetchOne('SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1');
+    }
+
+    public function latestPipelineError(): ?array
+    {
+        return $this->fetchOne('SELECT * FROM sync_errors ORDER BY created_at DESC LIMIT 1');
+    }
+
     private function isMissingTable(\PDOException $exception): bool
     {
         return (int) ($exception->errorInfo[1] ?? 0) === self::MYSQL_TABLE_NOT_FOUND;
+    }
+
+    private function fetchOne(string $sql): ?array
+    {
+        try {
+            $stmt = $this->stageDb->query($sql);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            return $row ?: null;
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return null;
+            }
+
+            throw $exception;
+        }
     }
 
     private function buildRunFilters(array $filters): array

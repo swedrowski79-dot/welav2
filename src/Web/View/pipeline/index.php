@@ -54,6 +54,48 @@
     </div>
 </div>
 
+<div class="panel-card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h2 class="h5 mb-1">Ausfuehrungsstatus</h2>
+            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle.</div>
+        </div>
+        <?php $statusLabel = $runningRun ? 'running' : 'idle'; ?>
+        <span class="badge <?= Html::badgeClass($runningRun ? 'running' : 'info') ?>"><?= Html::escape($statusLabel) ?></span>
+    </div>
+    <div class="row g-3">
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="small text-secondary mb-1">Aktiver / letzter Schritt</div>
+                <div class="fw-semibold"><?= Html::escape(($runningRun['run_type'] ?? null) ?: ($latestRun['run_type'] ?? 'Kein Lauf')) ?></div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="small text-secondary mb-1">Letzter Start</div>
+                <div class="fw-semibold"><?= Html::escape(($runningRun['started_at'] ?? null) ?: ($latestRun['started_at'] ?? '-')) ?></div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="small text-secondary mb-1">Letztes Ende</div>
+                <div class="fw-semibold"><?= Html::escape($latestRun['ended_at'] ?? '-') ?></div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="small text-secondary mb-1">Letzter Fehlerstatus</div>
+                <?php if ($latestError): ?>
+                    <div class="fw-semibold text-danger"><?= Html::escape($latestError['message']) ?></div>
+                    <div class="small text-secondary mt-1"><?= Html::escape($latestError['created_at'] ?? '-') ?></div>
+                <?php else: ?>
+                    <div class="fw-semibold text-success">Kein Fehler protokolliert</div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4 border border-danger-subtle">
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-start">
         <div>
@@ -65,6 +107,9 @@
                 ['action' => 'queue', 'label' => 'Reset Queue', 'warning' => 'Alle Export-Queue-Eintraege werden geloescht. Fortfahren?'],
                 ['action' => 'stage', 'label' => 'Reset Stage', 'warning' => 'Alle stage_* Tabellen werden geleert. Fortfahren?'],
                 ['action' => 'delta_state', 'label' => 'Reset Delta State', 'warning' => 'Der komplette Produkt-Delta-State wird geloescht. Fortfahren?'],
+                ['action' => 'logs', 'label' => 'Reset Logs', 'warning' => 'Alle Sync-Logs werden geloescht. Fortfahren?'],
+                ['action' => 'errors', 'label' => 'Reset Errors', 'warning' => 'Alle Sync-Fehler werden geloescht. Fortfahren?'],
+                ['action' => 'runs', 'label' => 'Reset Runs', 'warning' => 'Die komplette Sync-Laufhistorie wird geloescht. Fortfahren?'],
                 ['action' => 'full', 'label' => 'Full Reset', 'warning' => 'Queue, Stage und Delta-State werden komplett zurueckgesetzt. Fortfahren?'],
             ] as $reset): ?>
                 <form method="post" action="/pipeline/reset" onsubmit="return confirm('<?= Html::escape($reset['warning']) ?>');">
