@@ -135,3 +135,43 @@ Because the repo has no formal test suite, validate with repository-native check
 - manual admin UI check at `http://localhost:8080`
 
 Do not claim validation succeeded unless it was actually run.
+
+## Ticket Workflow
+
+All development tasks are defined as tickets in:
+docs/tickets/open/
+
+When a task is requested like:
+"Implement T-001"
+
+You must:
+1. Load all relevant markdown files first:
+   - `AGENTS.md`
+   - `.github/copilot-instructions.md`
+   - `PROJECT_CONTEXT.md`
+   - `docs/CODEX_WORKFLOW.md` if it exists
+   - the assigned ticket in `docs/tickets/open/`
+   - relevant files in `docs/agent-results/`
+   - other directly task-relevant `.md` files
+2. Follow all requirements
+3. Apply changes only in relevant areas
+4. Write result file in docs/agent-results/
+5. Update the ticket
+6. Commit and push changes
+
+Never ignore ticket requirements.
+
+## Documentation Priority
+
+Before implementing a ticket, load the relevant markdown documentation first.
+
+Priority order:
+1. AGENTS.md
+2. .github/copilot-instructions.md
+3. PROJECT_CONTEXT.md
+4. docs/CODEX_WORKFLOW.md
+5. assigned ticket in docs/tickets/open/
+6. relevant files in docs/agent-results/
+7. other task-relevant markdown files
+
+Do not start implementation until the relevant markdown files have been read.
