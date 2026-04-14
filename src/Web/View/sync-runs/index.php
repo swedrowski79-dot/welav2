@@ -12,7 +12,7 @@
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end">
         <div>
             <h2 class="h5 mb-1">Sync starten</h2>
-            <div class="text-secondary small">Import, Merge und Expand koennen direkt aus der Oberflaeche gestartet werden.</div>
+            <div class="text-secondary small">Import, Merge, Expand, Delta und die komplette Pipeline koennen direkt aus der Oberflaeche gestartet werden.</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
             <form method="post" action="/sync-runs/start">
@@ -26,6 +26,14 @@
             <form method="post" action="/sync-runs/start">
                 <input type="hidden" name="job" value="expand">
                 <button class="btn btn-outline-secondary" type="submit">Expand starten</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="delta">
+                <button class="btn btn-outline-dark" type="submit">Delta starten</button>
+            </form>
+            <form method="post" action="/sync-runs/start">
+                <input type="hidden" name="job" value="full_pipeline">
+                <button class="btn btn-dark" type="submit">Full Pipeline</button>
             </form>
         </div>
     </div>

@@ -10,6 +10,8 @@ final class SyncLauncher
         'import_all' => 'php /app/run_import_all.php',
         'merge' => 'php /app/run_merge.php',
         'expand' => 'php /app/run_expand.php',
+        'delta' => 'php /app/run_delta.php',
+        'full_pipeline' => 'php /app/run_import_all.php && php /app/run_merge.php && php /app/run_expand.php',
     ];
 
     public function launch(string $job): void

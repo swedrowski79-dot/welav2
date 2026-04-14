@@ -6,6 +6,7 @@ $adminConfig = web_config('admin');
 $appName = $adminConfig['app_name'];
 $navigation = [
     '/' => 'Dashboard',
+    '/pipeline' => 'Pipeline',
     '/sync-runs' => 'Sync-Laeufe',
     '/logs' => 'Logs',
     '/errors' => 'Fehler',
