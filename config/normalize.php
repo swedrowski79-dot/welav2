@@ -40,6 +40,9 @@ return [
                 'header_image'  => 'Bild_gross',
                 'online_flag'   => 'Internet',
             ],
+            'calculated' => [
+                'online_flag' => 'calc:afs_category_online_flag',
+            ],
         ],
 
         'extra.article_translations' => [

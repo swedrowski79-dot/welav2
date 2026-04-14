@@ -63,6 +63,9 @@ class Normalizer
                 $flag = trim((string)($normalized['variant_flag'] ?? ''));
                 return ($flag !== '' && strcasecmp($flag, 'Master') !== 0) ? $flag : null;
 
+            case 'calc:afs_category_online_flag':
+                return 1;
+
             default:
                 throw new RuntimeException("Unknown calculated resolver: {$resolver}");
         }

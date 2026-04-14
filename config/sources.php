@@ -177,6 +177,9 @@ return [
                         'Bild_gross',
                         'Beschreibung',
                     ],
+                    'where' => [
+                        'Internet = 0',
+                    ],
                 ],
                 'documents' => [
                     'table' => $qualifiedAfsTable($env('AFS_DOCUMENTS_TABLE', 'Dokumente')),
