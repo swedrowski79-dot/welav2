@@ -18,16 +18,17 @@
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h2 class="h5 mb-1">Pipeline-Steuerung</h2>
-                    <div class="text-secondary small">Merge, Expand, Delta oder die komplette Pipeline direkt aus der Admin-Oberflaeche starten.</div>
+                    <div class="text-secondary small">Import, Merge, Expand, Delta oder die komplette Pipeline direkt aus der Admin-Oberflaeche starten.</div>
                 </div>
                 <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Produkt Export State</a>
             </div>
             <div class="d-flex flex-wrap gap-2">
                 <?php foreach ([
+                    ['job' => 'import_all', 'label' => 'Run Import', 'class' => 'btn-primary'],
                     ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary'],
                     ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary'],
                     ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark'],
-                    ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-primary'],
+                    ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark'],
                 ] as $job): ?>
                     <form method="post" action="/pipeline/start">
                         <input type="hidden" name="job" value="<?= Html::escape($job['job']) ?>">
