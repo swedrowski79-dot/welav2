@@ -116,6 +116,11 @@ final class MigrationRepository
             return $this->columnExists('stage_products', 'hash');
         }
 
+        if ($version === '004_add_export_queue_claim_fields') {
+            return $this->columnExists('export_queue', 'claim_token')
+                && $this->columnExists('export_queue', 'claimed_at');
+        }
+
         return false;
     }
 
