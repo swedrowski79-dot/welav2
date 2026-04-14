@@ -3,14 +3,20 @@
 while true; do
   echo "-----------------------------"
 
-  commit_msg=$(whiptail --inputbox "Commit Nachricht:" 10 60 3>&1 1>&2 2>&3)
+  read -p "Commit Nachricht: " commit_msg
 
-  branch=$(git branch --format="%(refname:short)" | fzf --prompt="🌿 Branch wählen: ")
+  echo ""
+  echo "🌿 Wähle einen Branch:"
 
-  if [ -z "$branch" ] || [ -z "$commit_msg" ]; then
-    echo "❌ Abgebrochen"
-    continue
-  fi
+  branches=($(git branch --format="%(refname:short)"))
+
+  select branch in "${branches[@]}"; do
+    if [ -n "$branch" ]; then
+      break
+    else
+      echo "❌ Ungültige Auswahl"
+    fi
+  done
 
   git add .
   git commit -m "$commit_msg"
@@ -18,5 +24,13 @@ while true; do
 
   echo "✅ Gepusht auf $branch"
   echo ""
+
+  # 🔁 Abfrage ob weitermachen
+  read -p "Noch ein Commit/Branch? (j/n): " answer
+
+  if [[ "$answer" != "j" && "$answer" != "J" ]]; then
+    echo "👋 Script beendet"
+    break
+  fi
 
 done
