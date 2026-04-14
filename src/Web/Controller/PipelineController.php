@@ -13,6 +13,7 @@ use App\Web\Repository\MonitoringRepository;
 use App\Web\Repository\MigrationRepository;
 use App\Web\Repository\PipelineAdminRepository;
 use App\Web\Repository\SchemaHealthRepository;
+use App\Web\Repository\StageConsistencyRepository;
 use App\Web\Repository\StageConnection;
 use App\Web\Repository\SyncLauncher;
 
@@ -24,6 +25,7 @@ final class PipelineController extends Controller
         $repository = new PipelineAdminRepository($stageDb, \web_config('admin'));
         $monitoringRepository = new MonitoringRepository($stageDb);
         $schemaHealth = new SchemaHealthRepository();
+        $consistencyRepository = new StageConsistencyRepository();
         $migrationRepository = new MigrationRepository($stageDb, dirname(__DIR__, 3) . '/migrations');
         $filters = [
             'entity_type' => $request->string('entity_type'),
@@ -47,6 +49,7 @@ final class PipelineController extends Controller
             'queueSummary' => $repository->queueSummary(),
             'stateSummary' => $repository->stateSummary(),
             'schemaIssues' => $schemaHealth->issues($stageDb),
+            'consistencyReport' => $consistencyRepository->report($stageDb),
             'migrationSummary' => $migrationRepository->summary(),
             'runningRun' => $focusRun,
             'latestRun' => $latestRun,

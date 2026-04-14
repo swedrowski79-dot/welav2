@@ -38,6 +38,41 @@
     </div>
 <?php endif; ?>
 
+<?php if (!empty($consistencyReport['checks'])): ?>
+    <div class="alert alert-warning border-0 shadow-sm mb-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+            <div>
+                <div class="fw-semibold mb-2">Stage-Konsistenzhinweise</div>
+                <div class="small mb-3">
+                    Es wurden <?= Html::escape($consistencyReport['summary']['issues'] ?? 0) ?> relevante Konsistenzprobleme
+                    mit insgesamt <?= Html::escape($consistencyReport['summary']['affected_rows'] ?? 0) ?> betroffenen Datensaetzen gefunden.
+                    Die Anwendung bleibt nutzbar, aber Delta- und Exportergebnisse koennen unvollstaendig sein.
+                </div>
+                <div class="d-grid gap-2">
+                    <?php foreach ($consistencyReport['checks'] as $check): ?>
+                        <div class="border rounded-4 bg-white p-3">
+                            <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
+                                <div class="fw-semibold"><?= Html::escape($check['name']) ?></div>
+                                <span class="badge <?= Html::badgeClass($check['severity']) ?>"><?= Html::escape($check['count']) ?> betroffen</span>
+                            </div>
+                            <div class="small text-secondary mt-2"><?= Html::escape($check['description']) ?></div>
+                            <?php if (!empty($check['examples'])): ?>
+                                <div class="small mt-2">
+                                    <span class="text-secondary">Beispiele:</span>
+                                    <?= Html::escape(implode(', ', $check['examples'])) ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="small text-warning-emphasis">
+                Empfohlener Ablauf: Import oder Merge erneut ausfuehren, anschliessend Stage-Daten und Queue pruefen.
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+
 <div class="row g-4 mb-4">
     <div class="col-12 col-xl-7">
         <div class="panel-card p-4 h-100">
