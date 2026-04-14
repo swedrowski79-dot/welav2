@@ -44,7 +44,7 @@
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h2 class="h5 mb-1">Pipeline-Steuerung</h2>
-                    <div class="text-secondary small">Import, Merge, Expand, Delta oder die komplette Pipeline direkt aus der Admin-Oberflaeche starten.</div>
+                    <div class="text-secondary small">Die Aktionen sind entlang des Pipeline-Flusses gruppiert, damit Import, Verarbeitung, Delta und Gesamtlauf sofort erkennbar sind.</div>
                 </div>
                 <div class="d-flex gap-2">
                     <span class="badge text-bg-secondary align-self-center">Migrations pending: <?= Html::escape($migrationSummary['pending'] ?? 0) ?></span>
@@ -54,23 +54,58 @@
                     <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Produkt Export State</a>
                 </div>
             </div>
-            <div class="d-flex flex-wrap gap-2">
-                <?php foreach ([
-                    ['job' => 'import_all', 'label' => 'Run Import', 'class' => 'btn-primary'],
-                    ['job' => 'import_products', 'label' => 'Run Product Import', 'class' => 'btn-outline-primary'],
-                    ['job' => 'import_categories', 'label' => 'Run Category Import', 'class' => 'btn-outline-primary'],
-                    ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary'],
-                    ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary'],
-                    ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark'],
-                    ['job' => 'export_queue_worker', 'label' => 'Run Export Worker', 'class' => 'btn-outline-dark'],
-                    ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark'],
-                ] as $job): ?>
-                    <form method="post" action="/pipeline/start">
-                        <input type="hidden" name="job" value="<?= Html::escape($job['job']) ?>">
-                        <button class="btn <?= Html::escape($job['class']) ?>" type="submit"><?= Html::escape($job['label']) ?></button>
-                    </form>
-                <?php endforeach; ?>
-            </div>
+            <?php foreach ([
+                [
+                    'title' => '1. Import (AFS → RAW)',
+                    'description' => 'Quellen nach RAW laden. Fuer schnelle Tests koennen einzelne Importbereiche separat gestartet werden.',
+                    'jobs' => [
+                        ['job' => 'import_all', 'label' => 'Run Import', 'class' => 'btn-primary', 'help' => 'Laedt alle aktuellen Importquellen in die RAW-Tabellen.'],
+                        ['job' => 'import_products', 'label' => 'Run Product Import', 'class' => 'btn-outline-primary', 'help' => 'Importiert nur Produktdaten und Artikel-Uebersetzungen.'],
+                        ['job' => 'import_categories', 'label' => 'Run Category Import', 'class' => 'btn-outline-primary', 'help' => 'Importiert nur Kategorien und Kategorie-Uebersetzungen.'],
+                    ],
+                ],
+                [
+                    'title' => '2. Processing (Merge / Expand)',
+                    'description' => 'RAW-Daten zu Stage-Daten verdichten und anschliessend erweiterte Attributzeilen erzeugen.',
+                    'jobs' => [
+                        ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary', 'help' => 'Fuehrt RAW-Quellen zu den Stage-Grunddaten zusammen.'],
+                        ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary', 'help' => 'Erzeugt expandierte Attributzeilen und anschliessende Folgeinformationen.'],
+                    ],
+                ],
+                [
+                    'title' => '3. Delta',
+                    'description' => 'Aenderungen gegen den bestaetigten Export-Stand erkennen und Queue-Eintraege bzw. Worker-Schritte ausfuehren.',
+                    'jobs' => [
+                        ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark', 'help' => 'Berechnet Produktaenderungen und fuellt die Export Queue.'],
+                        ['job' => 'export_queue_worker', 'label' => 'Run Export Worker', 'class' => 'btn-outline-dark', 'help' => 'Bestaetigt Queue-Eintraege und aktualisiert den bestaetigten Export-Status.'],
+                    ],
+                ],
+                [
+                    'title' => '4. Full Pipeline',
+                    'description' => 'Gesamtlauf fuer einen kompletten Durchgang von Import bis Verarbeitung.',
+                    'jobs' => [
+                        ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark', 'help' => 'Startet Import, Merge und Expand in der vorgesehenen Reihenfolge.'],
+                    ],
+                ],
+            ] as $section): ?>
+                <div class="border rounded-4 p-3 p-lg-4 mb-3 bg-light-subtle">
+                    <div class="fw-semibold mb-1"><?= Html::escape($section['title']) ?></div>
+                    <div class="small text-secondary mb-3"><?= Html::escape($section['description']) ?></div>
+                    <div class="row g-3">
+                        <?php foreach ($section['jobs'] as $job): ?>
+                            <div class="col-12 col-md-6">
+                                <div class="border rounded-4 p-3 h-100 bg-white">
+                                    <form method="post" action="/pipeline/start" class="mb-2">
+                                        <input type="hidden" name="job" value="<?= Html::escape($job['job']) ?>">
+                                        <button class="btn <?= Html::escape($job['class']) ?> w-100" type="submit"><?= Html::escape($job['label']) ?></button>
+                                    </form>
+                                    <div class="small text-secondary"><?= Html::escape($job['help']) ?></div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl-3">
