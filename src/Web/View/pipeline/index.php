@@ -94,7 +94,7 @@
     <div class="d-flex justify-content-between align-items-start mb-3">
         <div>
             <h2 class="h5 mb-1">Ausfuehrungsstatus</h2>
-            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle.</div>
+            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle. Bei laufenden Jobs Seite einfach neu laden.</div>
         </div>
         <?php $statusLabel = $runningRun ? 'running' : 'idle'; ?>
         <span class="badge <?= Html::badgeClass($runningRun ? 'running' : 'info') ?>"><?= Html::escape($statusLabel) ?></span>
@@ -126,6 +126,25 @@
                     <div class="small text-secondary mt-1"><?= Html::escape($latestError['created_at'] ?? '-') ?></div>
                 <?php else: ?>
                     <div class="fw-semibold text-success">Kein Fehler protokolliert</div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="border rounded-4 p-3 bg-light-subtle">
+                <div class="small text-secondary mb-1">Aktueller / letzter Fortschritt</div>
+                <?php if (!empty($activeLog)): ?>
+                    <div class="fw-semibold"><?= Html::escape($activeLog['message'] ?? '-') ?></div>
+                    <div class="small text-secondary mt-1">
+                        <?= Html::escape($activeLog['created_at'] ?? '-') ?>
+                        <?php if (!empty($activeLog['run_type'])): ?>
+                            · <?= Html::escape($activeLog['run_type']) ?>
+                        <?php endif; ?>
+                        <?php if (!empty($activeLog['level'])): ?>
+                            · <?= Html::escape($activeLog['level']) ?>
+                        <?php endif; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="fw-semibold text-secondary">Kein Fortschrittslog verfuegbar</div>
                 <?php endif; ?>
             </div>
         </div>

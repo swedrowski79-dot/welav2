@@ -26,11 +26,16 @@ final class SyncLauncher
         }
 
         $logFile = '/tmp/' . $job . '.log';
-        $backgroundCommand = sprintf('(%s) > %s 2>&1 < /dev/null &', $command, escapeshellarg($logFile));
+        $shellCommand = sprintf(
+            'nohup /bin/sh -lc %s > %s 2>&1 < /dev/null & echo $!',
+            escapeshellarg($command),
+            escapeshellarg($logFile)
+        );
 
-        exec($backgroundCommand, $output, $exitCode);
+        exec($shellCommand, $output, $exitCode);
+        $pid = trim((string) ($output[0] ?? ''));
 
-        if ($exitCode !== 0) {
+        if ($exitCode !== 0 || $pid === '' || !ctype_digit($pid)) {
             throw new \RuntimeException('Sync-Job konnte nicht gestartet werden.');
         }
     }

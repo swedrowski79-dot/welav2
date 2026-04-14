@@ -280,6 +280,35 @@ final class MonitoringRepository
         }
     }
 
+    public function latestLogForRun(?int $runId = null): ?array
+    {
+        if ($runId === null || $runId <= 0) {
+            return null;
+        }
+
+        try {
+            $stmt = $this->stageDb->prepare(
+                'SELECT l.*, r.run_type, r.status AS run_status
+                 FROM sync_logs l
+                 LEFT JOIN sync_runs r ON r.id = l.sync_run_id
+                 WHERE l.sync_run_id = :run_id
+                 ORDER BY l.created_at DESC, l.id DESC
+                 LIMIT 1'
+            );
+            $stmt->bindValue(':run_id', $runId, \PDO::PARAM_INT);
+            $stmt->execute();
+
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            return $row ?: null;
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return null;
+            }
+
+            throw $exception;
+        }
+    }
+
     private function isMissingTable(\PDOException $exception): bool
     {
         return (int) ($exception->errorInfo[1] ?? 0) === self::MYSQL_TABLE_NOT_FOUND;
