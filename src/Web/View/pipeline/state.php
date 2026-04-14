@@ -10,6 +10,23 @@
     </div>
 </div>
 
+<div class="row g-4 mb-4">
+    <div class="col-12 col-md-6">
+        <div class="metric-card p-4 h-100">
+            <div class="metric-icon mb-3"><i class="bi bi-fingerprint"></i></div>
+            <div class="display-6 fw-semibold"><?= Html::escape($paginator->total) ?></div>
+            <div class="text-secondary">State-Eintraege</div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6">
+        <div class="metric-card p-4 h-100">
+            <div class="metric-icon mb-3"><i class="bi bi-clock-history"></i></div>
+            <div class="display-6 fw-semibold"><?= Html::escape($entries[0]['last_seen_at'] ?? '-') ?></div>
+            <div class="text-secondary">Neueste Sichtung auf dieser Seite</div>
+        </div>
+    </div>
+</div>
+
 <div class="panel-card p-4 mb-4">
     <form class="row g-3" method="get" action="/pipeline/state">
         <div class="col-12 col-md-8">
@@ -33,12 +50,19 @@
 <div class="panel-card p-0">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
-            <thead><tr><th>Product ID</th><th>Last Exported Hash</th><th>Last Seen</th></tr></thead>
+            <thead><tr><th>Product ID</th><th>Hash</th><th>Last Seen</th></tr></thead>
             <tbody>
             <?php foreach ($entries as $entry): ?>
                 <tr>
-                    <td><?= Html::escape($entry['product_id']) ?></td>
-                    <td><code><?= Html::escape($entry['last_exported_hash'] ?? '') ?></code></td>
+                    <td><span class="fw-semibold"><?= Html::escape($entry['product_id']) ?></span></td>
+                    <td>
+                        <?php $hash = (string) ($entry['last_exported_hash'] ?? ''); ?>
+                        <?php if ($hash === ''): ?>
+                            <span class="text-secondary">kein Hash</span>
+                        <?php else: ?>
+                            <code title="<?= Html::escape($hash) ?>"><?= Html::escape(strlen($hash) > 16 ? substr($hash, 0, 16) . '…' : $hash) ?></code>
+                        <?php endif; ?>
+                    </td>
                     <td><?= Html::escape($entry['last_seen_at'] ?? '-') ?></td>
                 </tr>
             <?php endforeach; ?>

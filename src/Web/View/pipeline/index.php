@@ -156,7 +156,7 @@
             <div class="metric-icon mb-3"><i class="bi bi-hourglass-split"></i></div>
             <div class="display-6 fw-semibold"><?= Html::escape($queueSummary['pending']) ?></div>
             <div class="text-secondary">Queue pending</div>
-            <div class="small text-secondary mt-2">Done: <?= Html::escape($queueSummary['done']) ?>, Error: <?= Html::escape($queueSummary['error']) ?></div>
+            <div class="small text-secondary mt-2">Processing: <?= Html::escape($queueSummary['processing'] ?? 0) ?> · Done: <?= Html::escape($queueSummary['done']) ?> · Error: <?= Html::escape($queueSummary['error']) ?></div>
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl-2">
@@ -164,6 +164,24 @@
             <div class="metric-icon mb-3"><i class="bi bi-fingerprint"></i></div>
             <div class="display-6 fw-semibold"><?= Html::escape($stateSummary['entries']) ?></div>
             <div class="text-secondary">State-Eintraege</div>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card p-4 mb-4">
+    <div class="row g-3">
+        <div class="col-12 col-lg-8">
+            <h2 class="h5 mb-1">Arbeitsansicht fuer Queue und Pipeline</h2>
+            <div class="text-secondary small">Oben stehen Steuerung und aktueller Lauf. Unten folgt die Queue-Ansicht fuer konkrete Exporteintraege, Retries und Fehler.</div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
+                <span class="badge <?= Html::badgeClass('pending') ?>">pending</span>
+                <span class="badge <?= Html::badgeClass('running') ?>">processing</span>
+                <span class="badge <?= Html::badgeClass('success') ?>">done</span>
+                <span class="badge <?= Html::badgeClass('error') ?>">error</span>
+            </div>
+            <div class="small text-secondary text-lg-end mt-2">Statusfarben zeigen sofort, ob ein Eintrag wartet, verarbeitet wird, erfolgreich war oder blockiert ist.</div>
         </div>
     </div>
 </div>
@@ -357,7 +375,7 @@
             <label class="form-label">Status</label>
             <select class="form-select" name="status">
                 <option value="">Alle</option>
-                <?php foreach (['pending', 'done', 'error'] as $status): ?>
+                <?php foreach (['pending', 'processing', 'done', 'error'] as $status): ?>
                     <option value="<?= Html::escape($status) ?>" <?= $filters['status'] === $status ? 'selected' : '' ?>><?= Html::escape($status) ?></option>
                 <?php endforeach; ?>
             </select>
@@ -388,12 +406,15 @@
 
 <div class="panel-card p-0">
     <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center">
-        <h2 class="h5 mb-0">Export Queue</h2>
+        <div>
+            <h2 class="h5 mb-0">Export Queue</h2>
+            <div class="small text-secondary mt-1">Jede Zeile zeigt den Exportstatus, Retry-Zustand und die zugehoerigen Nutzdaten kompakt an.</div>
+        </div>
         <span class="text-secondary small"><?= Html::escape($paginator->total) ?> Eintraege</span>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
-            <thead><tr><th>ID</th><th>Entity</th><th>Action</th><th>Status</th><th>Payload JSON</th><th>Created</th></tr></thead>
+            <thead><tr><th>ID</th><th>Entity</th><th>Action</th><th>Status</th><th>Retry</th><th>Zeitfenster</th><th>Details</th></tr></thead>
             <tbody>
             <?php foreach ($queueEntries as $entry): ?>
                 <tr>
@@ -402,17 +423,41 @@
                         <div class="fw-semibold"><?= Html::escape($entry['entity_type']) ?></div>
                         <div class="small text-secondary">ID <?= Html::escape($entry['entity_id']) ?></div>
                     </td>
-                    <td><?= Html::escape($entry['action']) ?></td>
-                    <td><span class="badge <?= Html::badgeClass($entry['status']) ?>"><?= Html::escape($entry['status']) ?></span></td>
-                    <td><pre class="mb-0 small text-wrap"><?= Html::escape((string) ($entry['payload'] ?? '')) ?></pre></td>
-                    <td><?= Html::escape($entry['created_at'] ?? '-') ?></td>
+                    <td>
+                        <span class="badge text-bg-light border"><?= Html::escape($entry['action']) ?></span>
+                    </td>
+                    <td>
+                        <span class="badge <?= Html::badgeClass($entry['status']) ?>"><?= Html::escape($entry['status']) ?></span>
+                        <?php if (($entry['status'] ?? '') === 'error' && !empty($entry['last_error'])): ?>
+                            <div class="small text-danger mt-1 truncate-cell"><?= Html::escape($entry['last_error']) ?></div>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <div class="fw-semibold"><?= Html::escape($entry['attempt_count'] ?? 0) ?></div>
+                        <div class="small text-secondary">Versuche</div>
+                    </td>
+                    <td>
+                        <div class="small"><span class="text-secondary">Created:</span> <?= Html::escape($entry['created_at'] ?? '-') ?></div>
+                        <div class="small"><span class="text-secondary">Available:</span> <?= Html::escape($entry['available_at'] ?? '-') ?></div>
+                        <div class="small"><span class="text-secondary">Claimed:</span> <?= Html::escape($entry['claimed_at'] ?? '-') ?></div>
+                        <div class="small"><span class="text-secondary">Processed:</span> <?= Html::escape($entry['processed_at'] ?? '-') ?></div>
+                    </td>
+                    <td>
+                        <details>
+                            <summary class="small text-primary">Payload und Fehler anzeigen</summary>
+                            <pre class="mb-0 mt-2 small text-wrap"><?= Html::escape((string) ($entry['payload'] ?? '')) ?></pre>
+                            <?php if (!empty($entry['last_error'])): ?>
+                                <div class="small text-danger mt-2"><?= Html::escape($entry['last_error']) ?></div>
+                            <?php endif; ?>
+                        </details>
+                    </td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
     </div>
     <div class="d-flex justify-content-between align-items-center p-4">
-        <div class="text-secondary small">Nur erlaubte Filter: entity_type, status, action.</div>
+        <div class="text-secondary small">Filter helfen vor allem bei `processing`- und `error`-Eintraegen mit mehreren Retry-Versuchen.</div>
         <?php $path = '/pipeline'; $query = ['entity_type' => $filters['entity_type'], 'status' => $filters['status'], 'action' => $filters['action'], 'per_page' => $paginator->perPage]; require dirname(__DIR__) . '/partials/pagination.php'; ?>
     </div>
 </div>

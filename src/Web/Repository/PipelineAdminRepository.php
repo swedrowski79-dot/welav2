@@ -19,7 +19,7 @@ final class PipelineAdminRepository
         try {
             [$whereSql, $params] = $this->buildQueueFilters($filters);
 
-            $sql = "SELECT id, entity_type, entity_id, action, payload, status, created_at
+            $sql = "SELECT id, entity_type, entity_id, action, payload, status, attempt_count, available_at, claimed_at, processed_at, last_error, created_at
                     FROM export_queue
                     {$whereSql}
                     ORDER BY created_at DESC, id DESC
@@ -65,6 +65,7 @@ final class PipelineAdminRepository
     {
         return [
             'pending' => $this->countWhere('export_queue', "status = 'pending'"),
+            'processing' => $this->countWhere('export_queue', "status = 'processing'"),
             'done' => $this->countWhere('export_queue', "status = 'done'"),
             'error' => $this->countWhere('export_queue', "status = 'error'"),
         ];
