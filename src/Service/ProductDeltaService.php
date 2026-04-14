@@ -12,7 +12,11 @@ class ProductDeltaService
     private string $stateHashField;
     private string $stateLastSeenField;
     private string $offlineHash;
+    private string $queueTable;
+    private int $queueInsertBatchSize;
     private array $hashFields;
+    private array $pendingQueueSignatures = [];
+    private array $queuedEntries = [];
 
     public function __construct(
         private PDO $stageDb,
@@ -32,6 +36,8 @@ class ProductDeltaService
         $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
         $this->stateLastSeenField = (string) ($config['state_last_seen_field'] ?? 'last_seen_at');
         $this->offlineHash = hash('sha256', (string) ($config['offline_hash_value'] ?? 'offline'));
+        $this->queueTable = (string) ($config['queue_table'] ?? 'export_queue');
+        $this->queueInsertBatchSize = max(1, (int) ($config['queue_insert_batch_size'] ?? 200));
         $this->hashFields = is_array($config['hash_fields'] ?? null) ? $config['hash_fields'] : [];
     }
 
@@ -46,6 +52,8 @@ class ProductDeltaService
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
         $states = $this->fetchStates();
+        $this->pendingQueueSignatures = $this->fetchExistingQueueSignatures();
+        $this->queuedEntries = [];
 
         $stats = [
             'processed' => 0,
@@ -53,6 +61,7 @@ class ProductDeltaService
             'update' => 0,
             'offline' => 0,
             'unchanged' => 0,
+            'deduplicated' => 0,
             'errors' => 0,
         ];
 
@@ -96,11 +105,17 @@ class ProductDeltaService
 
                 $state = $states[$entityId] ?? null;
                 if ($state === null) {
-                    $this->enqueue($entityId, 'insert', $payloadData, $hash);
-                    $stats['insert']++;
+                    if ($this->enqueue($entityId, 'insert', $payloadData, $hash)) {
+                        $stats['insert']++;
+                    } else {
+                        $stats['deduplicated']++;
+                    }
                 } elseif (($state[$this->stateHashField] ?? null) !== $hash) {
-                    $this->enqueue($entityId, 'update', $payloadData, $hash);
-                    $stats['update']++;
+                    if ($this->enqueue($entityId, 'update', $payloadData, $hash)) {
+                        $stats['update']++;
+                    } else {
+                        $stats['deduplicated']++;
+                    }
                 } else {
                     $stats['unchanged']++;
                 }
@@ -129,12 +144,15 @@ class ProductDeltaService
             }
 
             try {
-                $this->enqueueOfflineUpdate($entityId);
-                $markOfflineStateStmt->execute([
-                    ':hash' => $this->offlineHash,
-                    ':product_id' => $entityId,
-                ]);
-                $stats['offline']++;
+                if ($this->enqueueOfflineUpdate($entityId)) {
+                    $markOfflineStateStmt->execute([
+                        ':hash' => $this->offlineHash,
+                        ':product_id' => $entityId,
+                    ]);
+                    $stats['offline']++;
+                } else {
+                    $stats['deduplicated']++;
+                }
             } catch (Throwable $exception) {
                 $stats['errors']++;
                 $this->logRecordError(
@@ -145,6 +163,7 @@ class ProductDeltaService
             }
         }
 
+        $this->flushQueuedEntries();
         $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['offline'];
 
         if ($this->monitor !== null) {
@@ -154,6 +173,7 @@ class ProductDeltaService
                 'insert' => $stats['insert'],
                 'update' => $stats['update'],
                 'offline' => $stats['offline'],
+                'deduplicated' => $stats['deduplicated'],
                 'errors' => $stats['errors'],
             ]);
         }
@@ -274,72 +294,138 @@ class ProductDeltaService
         return hash('sha256', $json);
     }
 
-    private function enqueue(int $entityId, string $action, array $payloadData, string $hash): void
+    private function enqueue(int $entityId, string $action, array $payloadData, string $hash): bool
     {
         $payload = [
             'hash' => $hash,
             'data' => $payloadData,
         ];
 
-        if ($this->hasPendingEntry($entityId, $action, $payload)) {
-            return;
-        }
-
-        $stmt = $this->stageDb->prepare(
-            'INSERT INTO export_queue (entity_type, entity_id, action, payload, status, created_at)
-             VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())'
-        );
-        $stmt->execute([
-            ':entity_type' => $this->entityType,
-            ':entity_id' => $entityId,
-            ':action' => $action,
-            ':payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            ':status' => 'pending',
-        ]);
+        return $this->scheduleQueueEntry($entityId, $action, $payload);
     }
 
-    private function enqueueOfflineUpdate(int $entityId): void
+    private function enqueueOfflineUpdate(int $entityId): bool
     {
         $payload = ['online' => 0];
 
-        if ($this->hasPendingEntry($entityId, 'update', $payload)) {
-            return;
-        }
+        return $this->scheduleQueueEntry($entityId, 'update', $payload);
+    }
 
+    private function fetchExistingQueueSignatures(): array
+    {
         $stmt = $this->stageDb->prepare(
-            'INSERT INTO export_queue (entity_type, entity_id, action, payload, status, created_at)
-             VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())'
+            "SELECT entity_id, action, payload
+             FROM `{$this->queueTable}`
+             WHERE entity_type = :entity_type
+               AND status IN ('pending', 'processing')"
         );
         $stmt->execute([
             ':entity_type' => $this->entityType,
-            ':entity_id' => $entityId,
-            ':action' => 'update',
-            ':payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+
+        $signatures = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $entityId = (int) ($row['entity_id'] ?? 0);
+            $action = (string) ($row['action'] ?? '');
+            $payloadJson = (string) ($row['payload'] ?? '');
+
+            if ($entityId <= 0 || $action === '' || $payloadJson === '') {
+                continue;
+            }
+
+            $signatures[$this->queueSignature($entityId, $action, $payloadJson)] = true;
+        }
+
+        return $signatures;
+    }
+
+    private function scheduleQueueEntry(int $entityId, string $action, array $payload): bool
+    {
+        $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($payloadJson === false) {
+            throw new RuntimeException('Export-Queue-Payload konnte nicht serialisiert werden.');
+        }
+
+        $signature = $this->queueSignature($entityId, $action, $payloadJson);
+        if (isset($this->pendingQueueSignatures[$signature])) {
+            return false;
+        }
+
+        $this->pendingQueueSignatures[$signature] = true;
+        $this->queuedEntries[] = [
+            'entity_id' => $entityId,
+            'action' => $action,
+            'payload' => $payloadJson,
+        ];
+
+        if (count($this->queuedEntries) >= $this->queueInsertBatchSize) {
+            $this->flushQueuedEntries();
+        }
+
+        return true;
+    }
+
+    private function flushQueuedEntries(): void
+    {
+        if ($this->queuedEntries === []) {
+            return;
+        }
+
+        $entries = $this->queuedEntries;
+        $this->queuedEntries = [];
+
+        try {
+            $this->insertQueuedEntriesBatch($entries);
+        } catch (Throwable) {
+            foreach ($entries as $entry) {
+                $this->insertQueuedEntry($entry);
+            }
+        }
+    }
+
+    private function insertQueuedEntriesBatch(array $entries): void
+    {
+        $valueSql = [];
+        $params = [];
+
+        foreach ($entries as $index => $entry) {
+            $valueSql[] = "(:entity_type_{$index}, :entity_id_{$index}, :action_{$index}, :payload_{$index}, :status_{$index}, NOW())";
+            $params[":entity_type_{$index}"] = $this->entityType;
+            $params[":entity_id_{$index}"] = (int) $entry['entity_id'];
+            $params[":action_{$index}"] = (string) $entry['action'];
+            $params[":payload_{$index}"] = (string) $entry['payload'];
+            $params[":status_{$index}"] = 'pending';
+        }
+
+        $sql = sprintf(
+            'INSERT INTO `%s` (entity_type, entity_id, action, payload, status, created_at) VALUES %s',
+            $this->queueTable,
+            implode(', ', $valueSql)
+        );
+
+        $stmt = $this->stageDb->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    private function insertQueuedEntry(array $entry): void
+    {
+        $stmt = $this->stageDb->prepare(
+            "INSERT INTO `{$this->queueTable}` (entity_type, entity_id, action, payload, status, created_at)
+             VALUES (:entity_type, :entity_id, :action, :payload, :status, NOW())"
+        );
+        $stmt->execute([
+            ':entity_type' => $this->entityType,
+            ':entity_id' => (int) $entry['entity_id'],
+            ':action' => (string) $entry['action'],
+            ':payload' => (string) $entry['payload'],
             ':status' => 'pending',
         ]);
     }
 
-    private function hasPendingEntry(int $entityId, string $action, array $payload): bool
+    private function queueSignature(int $entityId, string $action, string $payloadJson): string
     {
-        $stmt = $this->stageDb->prepare(
-            'SELECT id
-             FROM export_queue
-             WHERE entity_type = :entity_type
-               AND entity_id = :entity_id
-               AND action = :action
-               AND status = :status
-               AND payload = :payload
-             LIMIT 1'
-        );
-        $stmt->execute([
-            ':entity_type' => $this->entityType,
-            ':entity_id' => $entityId,
-            ':action' => $action,
-            ':status' => 'pending',
-            ':payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        ]);
-
-        return (bool) $stmt->fetchColumn();
+        return $entityId . '|' . $action . '|' . hash('sha256', $payloadJson);
     }
 
     private function logRecordError(int $entityId, string $message, Throwable $exception): void

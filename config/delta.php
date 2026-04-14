@@ -3,6 +3,7 @@
 return [
     'product_export_queue' => [
         'entity_type' => 'product',
+        'queue_insert_batch_size' => 200,
         'worker_batch_size' => 100,
         'worker_max_attempts' => 3,
         'worker_retry_delay_seconds' => 300,
