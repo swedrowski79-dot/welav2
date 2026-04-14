@@ -11,6 +11,7 @@ use App\Web\Core\Request;
 use App\Web\Core\Response;
 use App\Web\Repository\MonitoringRepository;
 use App\Web\Repository\PipelineAdminRepository;
+use App\Web\Repository\SchemaHealthRepository;
 use App\Web\Repository\StageConnection;
 use App\Web\Repository\SyncLauncher;
 
@@ -21,6 +22,7 @@ final class PipelineController extends Controller
         $stageDb = StageConnection::make();
         $repository = new PipelineAdminRepository($stageDb, \web_config('admin'));
         $monitoringRepository = new MonitoringRepository($stageDb);
+        $schemaHealth = new SchemaHealthRepository();
         $filters = [
             'entity_type' => $request->string('entity_type'),
             'status' => $request->string('status'),
@@ -41,6 +43,7 @@ final class PipelineController extends Controller
             'queueEntries' => $repository->paginatedQueueEntries($filters, $paginator),
             'queueSummary' => $repository->queueSummary(),
             'stateSummary' => $repository->stateSummary(),
+            'schemaIssues' => $schemaHealth->issues($stageDb),
             'runningRun' => $focusRun,
             'latestRun' => $latestRun,
             'latestError' => $monitoringRepository->latestPipelineError(),

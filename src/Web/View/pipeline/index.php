@@ -12,6 +12,23 @@
     <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
 <?php endif; ?>
 
+<?php if (!empty($schemaIssues)): ?>
+    <div class="alert alert-danger border-0 shadow-sm mb-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+            <div>
+                <div class="fw-semibold mb-2">Schema unvollstaendig</div>
+                <div class="small mb-3">Es fehlen benoetigte Tabellen oder Spalten fuer Stage-, Delta- oder Export-Funktionen. Die Admin-Oberflaeche bleibt verfuegbar, aber betroffene Funktionen koennen fehlschlagen.</div>
+                <ul class="mb-0 ps-3">
+                    <?php foreach ($schemaIssues as $issue): ?>
+                        <li><?= Html::escape($issue['message']) ?></li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+            <div class="small text-danger-emphasis">Bitte Schema aktualisieren, bevor Delta- oder Queue-Funktionen getestet werden.</div>
+        </div>
+    </div>
+<?php endif; ?>
+
 <div class="row g-4 mb-4">
     <div class="col-12 col-xl-7">
         <div class="panel-card p-4 h-100">
