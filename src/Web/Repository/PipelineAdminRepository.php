@@ -174,11 +174,21 @@ final class PipelineAdminRepository
     public function fullReset(): void
     {
         $this->resetQueue();
+        $rawTables = $this->rawTables();
+        $rawCount = 0;
+
+        foreach ($rawTables as $table) {
+            $this->stageDb->exec("TRUNCATE TABLE `{$table}`");
+            $rawCount++;
+        }
+
         $this->resetStageTables();
         $this->resetDeltaState();
 
         $this->logAdminAction('Vollreset wurde ausgefuehrt.', [
             'action' => 'full_reset',
+            'raw_tables' => $rawTables,
+            'raw_table_count' => $rawCount,
             'stage_tables' => $this->stageTables(),
         ], 'warning');
     }
@@ -246,6 +256,16 @@ final class PipelineAdminRepository
         return array_values(array_filter(
             array_keys($tables),
             static fn (string $table): bool => str_starts_with($table, 'stage_')
+        ));
+    }
+
+    private function rawTables(): array
+    {
+        $tables = $this->adminConfig['stage_tables'] ?? [];
+
+        return array_values(array_filter(
+            array_keys($tables),
+            static fn (string $table): bool => str_starts_with($table, 'raw_')
         ));
     }
 
