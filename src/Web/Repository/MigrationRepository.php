@@ -23,6 +23,24 @@ final class MigrationRepository
         ];
     }
 
+    public function lastResult(): ?array
+    {
+        $success = $this->latestMigrationSuccess();
+        $error = $this->latestMigrationError();
+
+        if ($success === null && $error === null) {
+            return null;
+        }
+
+        if ($success !== null && $error !== null) {
+            return strtotime((string) ($success['created_at'] ?? '')) >= strtotime((string) ($error['created_at'] ?? ''))
+                ? $success
+                : $error;
+        }
+
+        return $success ?? $error;
+    }
+
     public function runPending(): array
     {
         $this->ensureSchemaMigrationsTable();
@@ -135,6 +153,72 @@ final class MigrationRepository
         $stmt->execute([':table' => $table]);
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    private function latestMigrationSuccess(): ?array
+    {
+        if (!$this->tableExists('sync_logs')) {
+            return null;
+        }
+
+        $stmt = $this->stageDb->prepare(
+            'SELECT created_at, level, message, context_json
+             FROM sync_logs
+             WHERE message = :message
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':message' => 'Migrationen wurden ausgefuehrt.',
+        ]);
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+
+        $context = json_decode((string) ($row['context_json'] ?? '{}'), true);
+
+        return [
+            'status' => 'success',
+            'created_at' => $row['created_at'] ?? null,
+            'message' => $row['message'] ?? null,
+            'executed_count' => is_array($context) ? (int) ($context['executed_count'] ?? 0) : 0,
+            'executed' => is_array($context['executed'] ?? null) ? $context['executed'] : [],
+        ];
+    }
+
+    private function latestMigrationError(): ?array
+    {
+        if (!$this->tableExists('sync_errors')) {
+            return null;
+        }
+
+        $stmt = $this->stageDb->prepare(
+            'SELECT created_at, message, details
+             FROM sync_errors
+             WHERE source = :source
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':source' => 'migrations',
+        ]);
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+
+        $details = json_decode((string) ($row['details'] ?? '{}'), true);
+
+        return [
+            'status' => 'error',
+            'created_at' => $row['created_at'] ?? null,
+            'message' => $row['message'] ?? null,
+            'error' => is_array($details) ? (string) ($details['error'] ?? '') : '',
+            'version' => is_array($details) ? (string) ($details['version'] ?? '') : '',
+        ];
     }
 
     private function columnExists(string $table, string $column): bool

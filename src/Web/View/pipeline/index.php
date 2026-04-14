@@ -12,10 +12,6 @@
     <div class="alert alert-success border-0 shadow-sm">Pipeline-Job wurde gestartet und laeuft im Hintergrund.</div>
 <?php endif; ?>
 
-<?php if (isset($migrationsDone) && $migrationsDone !== null): ?>
-    <div class="alert alert-success border-0 shadow-sm">Migrationen abgeschlossen. Ausgefuehrte Migrationen: <?= Html::escape($migrationsDone) ?>.</div>
-<?php endif; ?>
-
 <?php if (!empty($resetDone)): ?>
     <div class="alert alert-warning border-0 shadow-sm">Reset-Aktion `<?= Html::escape($resetDone) ?>` wurde ausgefuehrt und in den Logs vermerkt.</div>
 <?php endif; ?>
@@ -37,10 +33,8 @@
                 </ul>
             </div>
             <div class="d-flex flex-column align-items-lg-end gap-2">
-                <div class="small text-danger-emphasis">Bitte Schema aktualisieren, bevor Delta- oder Queue-Funktionen getestet werden.</div>
-                <form method="post" action="/pipeline/migrations">
-                    <button class="btn btn-danger" type="submit">Run Migrations</button>
-                </form>
+                <div class="small text-danger-emphasis">Migrationen und Systemstatus stehen jetzt unter `Konfiguration/Status`, bevor Delta- oder Queue-Funktionen getestet werden.</div>
+                <a class="btn btn-danger" href="/status">Zu Konfiguration/Status</a>
             </div>
         </div>
     </div>
@@ -90,10 +84,6 @@
                     <div class="text-secondary small">Die Aktionen sind entlang des Pipeline-Flusses gruppiert, damit Import, Verarbeitung, Delta und Gesamtlauf sofort erkennbar sind.</div>
                 </div>
                 <div class="d-flex gap-2">
-                    <span class="badge text-bg-secondary align-self-center">Migrations pending: <?= Html::escape($migrationSummary['pending'] ?? 0) ?></span>
-                    <form method="post" action="/pipeline/migrations">
-                        <button class="btn btn-sm btn-outline-secondary" type="submit">Run Migrations</button>
-                    </form>
                     <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Produkt Export State</a>
                 </div>
             </div>

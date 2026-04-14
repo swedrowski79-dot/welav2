@@ -10,7 +10,6 @@ use App\Web\Core\Paginator;
 use App\Web\Core\Request;
 use App\Web\Core\Response;
 use App\Web\Repository\MonitoringRepository;
-use App\Web\Repository\MigrationRepository;
 use App\Web\Repository\PipelineAdminRepository;
 use App\Web\Repository\SchemaHealthRepository;
 use App\Web\Repository\StageConsistencyRepository;
@@ -26,7 +25,6 @@ final class PipelineController extends Controller
         $monitoringRepository = new MonitoringRepository($stageDb);
         $schemaHealth = new SchemaHealthRepository();
         $consistencyRepository = new StageConsistencyRepository();
-        $migrationRepository = new MigrationRepository($stageDb, dirname(__DIR__, 3) . '/migrations');
         $filters = [
             'entity_type' => $request->string('entity_type'),
             'status' => $request->string('status'),
@@ -53,7 +51,6 @@ final class PipelineController extends Controller
             'stateSummary' => $repository->stateSummary(),
             'schemaIssues' => $schemaHealth->issues($stageDb),
             'consistencyReport' => $consistencyRepository->report($stageDb),
-            'migrationSummary' => $migrationRepository->summary(),
             'runningRun' => $focusRun,
             'latestRun' => $latestRun,
             'activeLog' => $activeLog,
@@ -96,17 +93,6 @@ final class PipelineController extends Controller
         try {
             (new SyncLauncher())->launch($job);
             Response::redirect(Html::buildUrl('/pipeline', ['started' => 1]));
-        } catch (\Throwable $exception) {
-            Response::redirect(Html::buildUrl('/pipeline', ['error' => $exception->getMessage()]));
-        }
-    }
-
-    public function runMigrations(Request $request): void
-    {
-        try {
-            $repository = new MigrationRepository(StageConnection::make(), dirname(__DIR__, 3) . '/migrations');
-            $executed = $repository->runPending();
-            Response::redirect(Html::buildUrl('/pipeline', ['migrations_done' => count($executed)]));
         } catch (\Throwable $exception) {
             Response::redirect(Html::buildUrl('/pipeline', ['error' => $exception->getMessage()]));
         }

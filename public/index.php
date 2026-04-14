@@ -25,7 +25,6 @@ $router->get('/', new DashboardController());
 $router->get('/pipeline', [$pipelineController, 'index']);
 $router->get('/pipeline/state', [$pipelineController, 'state']);
 $router->post('/pipeline/start', [$pipelineController, 'start']);
-$router->post('/pipeline/migrations', [$pipelineController, 'runMigrations']);
 $router->post('/pipeline/reset', [$pipelineController, 'reset']);
 $router->get('/sync-runs', [$syncRunController, 'index']);
 $router->get('/sync-runs/show', [$syncRunController, 'show']);
@@ -37,5 +36,6 @@ $router->get('/stage-browser', [$stageBrowserController, 'index']);
 $router->get('/stage-browser/show', [$stageBrowserController, 'show']);
 $router->get('/status', new StatusController());
 $router->post('/status/save', [new StatusController(), 'save']);
+$router->post('/status/migrations', [new StatusController(), 'runMigrations']);
 
 $router->dispatch($request);

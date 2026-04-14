@@ -43,6 +43,10 @@ $fieldGroups = [
     <div class="alert alert-success border-0 shadow-sm">Konfiguration gespeichert. Neue Werte wirken sofort in der Weboberflaeche.</div>
 <?php endif; ?>
 
+<?php if (isset($migrationsDone) && $migrationsDone !== null): ?>
+    <div class="alert alert-success border-0 shadow-sm">Migrationen abgeschlossen. Ausgefuehrte Migrationen: <?= Html::escape($migrationsDone) ?>.</div>
+<?php endif; ?>
+
 <?php if (!empty($errorMessage)): ?>
     <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
 <?php endif; ?>
@@ -62,6 +66,66 @@ $fieldGroups = [
 </div>
 
 <div class="row g-4">
+    <div class="col-12">
+        <div class="panel-card p-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+                <div>
+                    <h2 class="h5 mb-1">Migrationen & Systemzustand</h2>
+                    <div class="text-secondary small">Migrationen werden hier ausgefuehrt, damit die Pipeline-Ansicht operativ und schema-resistent bleibt.</div>
+                </div>
+                <form method="post" action="/status/migrations">
+                    <button class="btn btn-outline-secondary" type="submit">Run Migrations</button>
+                </form>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-12 col-md-4">
+                    <div class="border rounded-4 p-3 bg-light-subtle h-100">
+                        <div class="small text-secondary mb-1">Pending Migrationen</div>
+                        <div class="fw-semibold"><?= Html::escape($migrationSummary['pending'] ?? 0) ?></div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="border rounded-4 p-3 bg-light-subtle h-100">
+                        <div class="small text-secondary mb-1">Migrationen gesamt</div>
+                        <div class="fw-semibold"><?= Html::escape($migrationSummary['total'] ?? 0) ?></div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="border rounded-4 p-3 bg-light-subtle h-100">
+                        <div class="small text-secondary mb-1">Bereits angewendet</div>
+                        <div class="fw-semibold"><?= Html::escape($migrationSummary['applied'] ?? 0) ?></div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="border rounded-4 p-3 bg-light-subtle">
+                        <div class="small text-secondary mb-1">Letztes Migrationsergebnis</div>
+                        <?php if (empty($migrationLastResult)): ?>
+                            <div class="fw-semibold">Noch kein Migrationsergebnis protokolliert.</div>
+                        <?php else: ?>
+                            <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
+                                <div>
+                                    <span class="badge <?= Html::badgeClass($migrationLastResult['status'] ?? 'info') ?>"><?= Html::escape($migrationLastResult['status'] ?? 'info') ?></span>
+                                    <span class="fw-semibold ms-2"><?= Html::escape($migrationLastResult['message'] ?? '-') ?></span>
+                                </div>
+                                <div class="small text-secondary"><?= Html::escape($migrationLastResult['created_at'] ?? '-') ?></div>
+                            </div>
+                            <?php if (($migrationLastResult['status'] ?? '') === 'success'): ?>
+                                <div class="small text-secondary mt-2">
+                                    Ausgefuehrte Migrationen: <?= Html::escape($migrationLastResult['executed_count'] ?? 0) ?>
+                                    <?php if (!empty($migrationLastResult['executed'])): ?>
+                                        · <?= Html::escape(implode(', ', $migrationLastResult['executed'])) ?>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                            <?php if (($migrationLastResult['status'] ?? '') === 'error' && !empty($migrationLastResult['error'])): ?>
+                                <div class="small text-danger mt-2"><?= Html::escape($migrationLastResult['error']) ?></div>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     <div class="col-12 col-xl-6">
         <div class="panel-card p-4 h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">

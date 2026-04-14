@@ -9,6 +9,7 @@ use App\Web\Core\Paginator;
 final class PipelineAdminRepository
 {
     private const MYSQL_TABLE_NOT_FOUND = 1146;
+    private ?array $exportQueueColumns = null;
 
     public function __construct(private \PDO $stageDb, private array $adminConfig)
     {
@@ -18,8 +19,9 @@ final class PipelineAdminRepository
     {
         try {
             [$whereSql, $params] = $this->buildQueueFilters($filters);
+            $columns = $this->queueSelectColumns();
 
-            $sql = "SELECT id, entity_type, entity_id, action, payload, status, attempt_count, available_at, claimed_at, processed_at, last_error, created_at
+            $sql = "SELECT {$columns}
                     FROM export_queue
                     {$whereSql}
                     ORDER BY created_at DESC, id DESC
@@ -300,5 +302,51 @@ final class PipelineAdminRepository
     private function isMissingTable(\PDOException $exception): bool
     {
         return (int) ($exception->errorInfo[1] ?? 0) === self::MYSQL_TABLE_NOT_FOUND;
+    }
+
+    private function queueSelectColumns(): string
+    {
+        $required = ['id', 'entity_type', 'entity_id', 'action', 'payload', 'status', 'created_at'];
+        $optional = ['attempt_count', 'available_at', 'claimed_at', 'processed_at', 'last_error'];
+        $present = $this->exportQueueColumns();
+        $selects = $required;
+
+        foreach ($optional as $column) {
+            if (in_array($column, $present, true)) {
+                $selects[] = $column;
+                continue;
+            }
+
+            $selects[] = "NULL AS {$column}";
+        }
+
+        return implode(', ', $selects);
+    }
+
+    private function exportQueueColumns(): array
+    {
+        if ($this->exportQueueColumns !== null) {
+            return $this->exportQueueColumns;
+        }
+
+        try {
+            $stmt = $this->stageDb->query('SHOW COLUMNS FROM `export_queue`');
+            $columns = [];
+
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                $field = $row['Field'] ?? null;
+                if (is_string($field) && $field !== '') {
+                    $columns[] = $field;
+                }
+            }
+
+            return $this->exportQueueColumns = $columns;
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return $this->exportQueueColumns = [];
+            }
+
+            throw $exception;
+        }
     }
 }
