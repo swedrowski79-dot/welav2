@@ -105,6 +105,7 @@ return [
     'sources' => [
         'afs' => [
             'type' => 'mssql',
+            'write_batch_size' => 250,
             'connection' => [
                 'host' => $env('AFS_DB_HOST', $isDocker ? 'host.docker.internal' : '127.0.0.1'),
                 'port' => $envInt('AFS_DB_PORT', 1435),
@@ -199,6 +200,7 @@ return [
 
         'extra' => [
             'type' => 'sqlite',
+            'write_batch_size' => 250,
             'connection' => [
                 'path' => $detectExtraPath(),
             ],

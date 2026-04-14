@@ -2,33 +2,78 @@
 
 class ExtraImporter
 {
+    private int $writeBatchSize;
+
     public function __construct(
         private PDO $sourceDb,
         private StageWriter $stageWriter,
         private Normalizer $normalizer,
         private array $sourceConfig
     ) {
+        $this->writeBatchSize = max(1, (int) ($this->sourceConfig['write_batch_size'] ?? 250));
     }
 
     public function importArticleTranslations(): void
     {
-        $table = $this->sourceConfig['entities']['article_translations']['table'];
-        $stmt = $this->sourceDb->query("SELECT * FROM {$table}");
-
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $normalized = $this->normalizer->normalize('extra.article_translations', $row);
-            $this->stageWriter->insert('raw_extra_article_translations', $normalized);
-        }
+        $stmt = $this->runEntityQuery('article_translations');
+        $this->importIntoTable($stmt, 'extra.article_translations', 'raw_extra_article_translations');
     }
 
     public function importCategoryTranslations(): void
     {
-        $table = $this->sourceConfig['entities']['category_translations']['table'];
-        $stmt = $this->sourceDb->query("SELECT * FROM {$table}");
+        $stmt = $this->runEntityQuery('category_translations');
+        $this->importIntoTable($stmt, 'extra.category_translations', 'raw_extra_category_translations');
+    }
+
+    private function runEntityQuery(string $entityName): PDOStatement
+    {
+        $entityConfig = $this->sourceConfig['entities'][$entityName] ?? null;
+
+        if (!is_array($entityConfig)) {
+            throw new RuntimeException("Extra entity '{$entityName}' is not configured.");
+        }
+
+        $table = $entityConfig['table'] ?? null;
+        $columns = $entityConfig['columns'] ?? null;
+
+        if (!is_string($table) || $table === '') {
+            throw new RuntimeException("Extra entity '{$entityName}' is missing a table configuration.");
+        }
+
+        if (!is_array($columns) || $columns === []) {
+            throw new RuntimeException("Extra entity '{$entityName}' is missing column definitions.");
+        }
+
+        $selectColumns = array_map(
+            fn (mixed $column): string => $this->quoteIdentifier((string) $column),
+            $columns
+        );
+
+        $sql = 'SELECT ' . implode(', ', $selectColumns) . ' FROM ' . $this->quoteIdentifier($table);
+
+        return $this->sourceDb->query($sql);
+    }
+
+    private function importIntoTable(PDOStatement $stmt, string $normalizeKey, string $targetTable): void
+    {
+        $batch = [];
 
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $normalized = $this->normalizer->normalize('extra.category_translations', $row);
-            $this->stageWriter->insert('raw_extra_category_translations', $normalized);
+            $batch[] = $this->normalizer->normalize($normalizeKey, $row);
+
+            if (count($batch) >= $this->writeBatchSize) {
+                $this->stageWriter->insertMany($targetTable, $batch);
+                $batch = [];
+            }
         }
+
+        if ($batch !== []) {
+            $this->stageWriter->insertMany($targetTable, $batch);
+        }
+    }
+
+    private function quoteIdentifier(string $identifier): string
+    {
+        return '"' . str_replace('"', '""', $identifier) . '"';
     }
 }
