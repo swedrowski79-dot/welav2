@@ -1,0 +1,10 @@
+.git
+.gitignore
+.idea
+.vscode
+node_modules
+vendor
+mysql_data
+docker-data
+docs
+README.md

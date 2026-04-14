@@ -1,0 +1,54 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Web\Repository;
+
+final class SourceStatusRepository
+{
+    public function statuses(): array
+    {
+        $sources = \web_config('sources')['sources'];
+
+        return [
+            'afs' => $this->checkConnection('AFS', $sources['afs']),
+            'extra' => $this->checkSqlite($sources['extra']),
+            'stage' => $this->checkConnection('Stage', $sources['stage']),
+        ];
+    }
+
+    private function checkConnection(string $label, array $config): array
+    {
+        try {
+            $pdo = \ConnectionFactory::create($config);
+            $pdo->query('SELECT 1');
+
+            return [
+                'label' => $label,
+                'status' => 'reachable',
+                'message' => 'Verbindung erfolgreich.',
+            ];
+        } catch (\Throwable $exception) {
+            return [
+                'label' => $label,
+                'status' => 'unreachable',
+                'message' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    private function checkSqlite(array $config): array
+    {
+        $path = $config['connection']['path'] ?? '';
+
+        if (!is_file($path)) {
+            return [
+                'label' => 'Extra SQLite',
+                'status' => 'unreachable',
+                'message' => "Datei nicht gefunden: {$path}",
+            ];
+        }
+
+        return $this->checkConnection('Extra SQLite', $config);
+    }
+}

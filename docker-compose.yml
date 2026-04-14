@@ -1,0 +1,48 @@
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: ["php", "-S", "0.0.0.0:8080", "-t", "public"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/app
+    environment:
+      AFS_DB_HOST: ${AFS_DB_HOST:-host.docker.internal}
+      AFS_DB_NAME: ${AFS_DB_NAME:-AFS_2018}
+      AFS_DB_USER: ${AFS_DB_USER:-sa}
+      AFS_DB_PASS: ${AFS_DB_PASS:-}
+      STAGE_DB_HOST: ${STAGE_DB_HOST:-mysql}
+      STAGE_DB_PORT: ${STAGE_DB_PORT:-3306}
+      STAGE_DB_NAME: ${STAGE_DB_NAME:-stage_sync}
+      STAGE_DB_USER: ${STAGE_DB_USER:-stage}
+      STAGE_DB_PASS: ${STAGE_DB_PASS:-stage}
+      EXTRA_SQLITE_PATH: ${EXTRA_SQLITE_PATH:-/app/data/extra.sqlite}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: stage_sync
+      MYSQL_USER: stage
+      MYSQL_PASSWORD: stage
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mysql_data:
