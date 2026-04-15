@@ -47,6 +47,7 @@ final class ImportWorkflow
             $this->truncateTables([
                 'raw_afs_articles',
                 'raw_afs_categories',
+                'raw_afs_documents',
                 'raw_extra_article_translations',
                 'raw_extra_category_translations',
             ]);
@@ -57,6 +58,7 @@ final class ImportWorkflow
             $this->finishSuccess($runId, [
                 'raw_afs_articles',
                 'raw_afs_categories',
+                'raw_afs_documents',
                 'raw_extra_article_translations',
                 'raw_extra_category_translations',
             ], 'Import aller Quellen abgeschlossen.');
@@ -79,6 +81,7 @@ final class ImportWorkflow
 
             $this->truncateTables([
                 'raw_afs_articles',
+                'raw_afs_documents',
                 'raw_extra_article_translations',
             ]);
 
@@ -86,6 +89,7 @@ final class ImportWorkflow
 
             $this->finishSuccess($runId, [
                 'raw_afs_articles',
+                'raw_afs_documents',
                 'raw_extra_article_translations',
             ], 'Produkt-Import abgeschlossen.');
 
@@ -128,6 +132,9 @@ final class ImportWorkflow
     {
         $this->afsImporter->importArticles();
         $this->monitor->log($runId, 'info', 'AFS Artikel importiert.');
+
+        $this->afsImporter->importDocuments();
+        $this->monitor->log($runId, 'info', 'AFS Dokumente importiert.');
 
         $this->extraImporter->importArticleTranslations();
         $this->monitor->log($runId, 'info', 'Extra Artikel-Uebersetzungen importiert.');

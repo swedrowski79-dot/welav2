@@ -1,7 +1,7 @@
 # Ticket: T-025
 
 ## Status
-open
+done
 
 ## Title
 Add raw import and normalization for AFS document records
@@ -33,3 +33,12 @@ Import AFS document/image source records into a dedicated raw table through the 
 
 ## Notes
 This ticket should not yet decide final stage/media modeling. It should stop at raw import and normalized raw persistence.
+
+## Implementation Notes
+- `raw_afs_documents` was added as a dedicated raw import table.
+- `afs.documents` was added to `config/normalize.php`.
+- `Dateiname` is normalized to `file_name` in the mapping layer via the existing filename transform.
+- The live AFS source uses `Dateiname` as the stored source path, so that value is persisted into `path` for traceability.
+- `ImportWorkflow` imports AFS documents together with the product-side raw import path.
+- The default AFS documents source was aligned to the live environment name `Dokument`, while remaining overrideable through `AFS_DOCUMENTS_TABLE`.
+- The live raw mapping uses `Zaehler`, `Artikel`, `Titel`, `Dateiname`, and `Art` because the current AFS source does not expose the originally assumed `Dokumente` columns.

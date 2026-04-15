@@ -25,6 +25,12 @@ class AfsImporter
         $this->importIntoTable($stmt, 'afs.categories', 'raw_afs_categories');
     }
 
+    public function importDocuments(): void
+    {
+        $stmt = $this->runEntityQuery('documents');
+        $this->importIntoTable($stmt, 'afs.documents', 'raw_afs_documents');
+    }
+
     private function runEntityQuery(string $entityName): PDOStatement
     {
         $entityConfig = $this->sourceConfig['entities'][$entityName] ?? null;

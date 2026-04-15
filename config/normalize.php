@@ -51,6 +51,20 @@ return [
             ],
         ],
 
+        'afs.documents' => [
+            'fields' => [
+                'afs_document_id' => 'Zaehler',
+                'afs_artikel_id'  => 'Artikel',
+                'name'            => 'Titel',
+                'file_name'       => [
+                    'source' => 'Dateiname',
+                    'transform' => 'calc:normalize_image_filename',
+                ],
+                'path'            => 'Dateiname',
+                'document_type'   => 'Art',
+            ],
+        ],
+
         'extra.article_translations' => [
             'fields' => [
                 'row_id'              => 'id',
