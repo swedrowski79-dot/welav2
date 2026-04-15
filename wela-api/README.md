@@ -31,6 +31,8 @@ X-Wela-Signature: <hmac-sha256 ueber "<timestamp>.<body>">
 - `delete_rows`
 - `sync_product`
 
+`sync_product` schreibt jetzt optional auch Produkt-SEO-URLs in `xt_seo_url`, aber nur wenn fuer das XT-Produkt noch keine SEO-Zeilen existieren. Bestehende SEO-URLs werden dabei nicht ueberschrieben.
+
 Antwortbeispiel:
 
 ```json

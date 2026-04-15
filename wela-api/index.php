@@ -162,6 +162,7 @@ try {
             $attributeEntities = wela_optional_array_list($request['attribute_entities'] ?? null, 'Produkt-Sync-Attribute muessen eine Liste sein.');
             $attributeDescriptions = wela_optional_array_list($request['attribute_descriptions'] ?? null, 'Produkt-Sync-Attribut-Uebersetzungen muessen eine Liste sein.');
             $attributeRelations = wela_optional_array_list($request['attribute_relations'] ?? null, 'Produkt-Sync-Attribut-Links muessen eine Liste sein.');
+            $seoUrls = wela_optional_array_list($request['seo_urls'] ?? null, 'Produkt-Sync-SEO-URLs muessen eine Liste sein.');
             $replaceCategories = (bool) ($request['replace_categories'] ?? false);
             $replaceAttributes = (bool) ($request['replace_attributes'] ?? false);
 
@@ -316,6 +317,37 @@ try {
                     );
                 }
 
+                $seoWrites = 0;
+
+                if ($seoUrls !== [] && !wela_seo_rows_exist($pdo, 1, $productId)) {
+                    foreach ($seoUrls as $seoUrl) {
+                        $languageCode = wela_allowed_language($seoUrl['language_code'] ?? null);
+                        $seoColumns = wela_allowed_field_map(
+                            wela_required_array($seoUrl['columns'] ?? null, 'Produkt-Sync-SEO benoetigt Spalten.'),
+                            wela_allowed_tables()['xt_seo_url']['write_fields']
+                        );
+
+                        $linkType = isset($seoColumns['link_type']) ? (int) $seoColumns['link_type'] : 1;
+                        $storeId = isset($seoColumns['store_id']) ? (int) $seoColumns['store_id'] : 1;
+
+                        unset($seoColumns['link_id'], $seoColumns['link_type'], $seoColumns['language_code'], $seoColumns['store_id']);
+
+                        wela_upsert_row(
+                            $pdo,
+                            'xt_seo_url',
+                            ['link_type', 'link_id', 'language_code', 'store_id'],
+                            [
+                                'link_type' => $linkType,
+                                'link_id' => $productId,
+                                'language_code' => $languageCode,
+                                'store_id' => $storeId,
+                            ],
+                            $seoColumns
+                        );
+                        $seoWrites++;
+                    }
+                }
+
                 $pdo->commit();
 
                 wela_respond(200, [
@@ -328,6 +360,7 @@ try {
                         'attribute_entities' => count($attributeEntities),
                         'attribute_descriptions' => count($attributeDescriptions),
                         'attribute_relations' => count($attributeRelations),
+                        'seo_urls' => $seoWrites,
                     ],
                 ]);
             } catch (Throwable $exception) {
@@ -454,6 +487,14 @@ function wela_allowed_tables(): array
             'primary_key' => ['products_id', 'attributes_id'],
             'read_fields' => ['products_id', 'attributes_id'],
             'write_fields' => ['products_id', 'attributes_id', 'attributes_parent_id'],
+        ],
+        'xt_seo_url' => [
+            'primary_key' => ['link_type', 'link_id', 'language_code', 'store_id'],
+            'read_fields' => ['link_type', 'link_id', 'language_code', 'store_id', 'url_text', 'url_md5'],
+            'write_fields' => [
+                'url_md5', 'url_text', 'language_code', 'link_type', 'link_id',
+                'meta_title', 'meta_description', 'meta_keywords', 'store_id',
+            ],
         ],
     ];
 }
@@ -605,6 +646,19 @@ function wela_delete_rows(PDO $pdo, string $table, array $where): int
     $stmt->execute(wela_sql_params($where));
 
     return $stmt->rowCount();
+}
+
+function wela_seo_rows_exist(PDO $pdo, int $linkType, int $linkId): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM `xt_seo_url` WHERE `link_type` = :link_type AND `link_id` = :link_id LIMIT 1'
+    );
+    $stmt->execute([
+        ':link_type' => $linkType,
+        ':link_id' => $linkId,
+    ]);
+
+    return (bool) $stmt->fetchColumn();
 }
 
 function wela_where_clause(array $values, string $prefix = ''): string
