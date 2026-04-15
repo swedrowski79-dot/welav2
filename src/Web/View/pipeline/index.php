@@ -106,7 +106,14 @@
                     ],
                 ],
                 [
-                    'title' => '3. Delta / Export',
+                    'title' => '3. XT Snapshot (optional)',
+                    'description' => 'Optionaler Zielsystem-Snapshot, um den aktuellen XT-Stand fuer spaetere target-aware Delta-Vergleiche verfuegbar zu machen. Der Snapshot laeuft unabhaengig von Queue und Export Worker.',
+                    'jobs' => [
+                        ['job' => 'xt_snapshot', 'label' => 'Run XT Snapshot', 'class' => 'btn-outline-info', 'help' => 'Liest Produkte, Kategorien, Medien und Dokumente aus XT ueber die API und aktualisiert die lokalen Snapshot-Tabellen.'],
+                    ],
+                ],
+                [
+                    'title' => '4. Delta / Export',
                     'description' => 'Delta kann bei Bedarf separat erneut ausgefuehrt werden. Der Export Worker verarbeitet danach die Queue bis zum aktuell implementierten XT-Sync-Endpunkt.',
                     'jobs' => [
                         ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark', 'help' => 'Optionaler manueller Delta-Neulauf fuer erneute Queue-Befuellung ohne neuen Expand-Lauf.'],
@@ -114,8 +121,8 @@
                     ],
                 ],
                 [
-                    'title' => '4. Full Pipeline',
-                    'description' => 'Gesamtlauf fuer einen kompletten Durchgang von Import bis Export Worker.',
+                    'title' => '5. Full Pipeline',
+                    'description' => 'Gesamtlauf fuer einen kompletten Durchgang von Import bis Export Worker. XT Snapshot bleibt bewusst ein optionaler separater Diagnoseschritt.',
                     'jobs' => [
                         ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark', 'help' => 'Startet Import, Merge, Expand inklusive Delta und anschliessend den Export Worker.'],
                     ],

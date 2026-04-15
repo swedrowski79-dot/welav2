@@ -253,6 +253,7 @@ final class PipelineController extends Controller
             'import_categories' => 'Kategorie-Import',
             'merge' => 'Merge',
             'expand' => 'Expand + Delta',
+            'xt_snapshot' => 'XT Snapshot',
             'delta_products', 'delta' => 'Delta',
             'export_queue_worker' => 'Export Worker',
             'full_pipeline' => 'Full Pipeline inkl. Export',

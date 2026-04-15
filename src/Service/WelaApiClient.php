@@ -16,6 +16,11 @@ final class WelaApiClient
         return $this->baseUrl !== '' && $this->apiKey !== '';
     }
 
+    public function health(): array
+    {
+        return $this->request('health', []);
+    }
+
     public function lookupMap(string $table, string $keyField, string $valueField): array
     {
         $response = $this->request('lookup_map', [
@@ -31,6 +36,33 @@ final class WelaApiClient
         }
 
         return $data;
+    }
+
+    public function fetchRows(string $table, array $fields, int $offset = 0, int $limit = 500): array
+    {
+        $response = $this->request('fetch_rows', [
+            'table' => $table,
+            'fields' => array_values($fields),
+            'offset' => max(0, $offset),
+            'limit' => max(1, $limit),
+        ]);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Snapshot-Ergebnis.');
+        }
+
+        $rows = $data['rows'] ?? null;
+        if (!is_array($rows)) {
+            throw new RuntimeException('XT-API Snapshot-Antwort enthaelt keine gueltigen Zeilen.');
+        }
+
+        return [
+            'rows' => $rows,
+            'total' => (int) ($data['total'] ?? 0),
+            'next_offset' => isset($data['next_offset']) ? (int) $data['next_offset'] : null,
+            'limit' => (int) ($data['limit'] ?? $limit),
+        ];
     }
 
     public function upsertRow(string $table, array $identity, array $columns, string $primaryKey): array
@@ -100,9 +132,11 @@ final class WelaApiClient
                 'timeout' => 30,
                 'header' => implode("\r\n", [
                     'Content-Type: application/json',
+                    'Accept: application/json',
                     'X-Wela-Key: ' . $this->apiKey,
                     'X-Wela-Timestamp: ' . $timestamp,
                     'X-Wela-Signature: ' . $signature,
+                    'Content-Length: ' . strlen($encodedBody),
                 ]),
                 'content' => $encodedBody,
             ],
@@ -131,9 +165,11 @@ final class WelaApiClient
 
     private function actionUrl(string $action): string
     {
-        $separator = str_contains($this->baseUrl, '?') ? '&' : '?';
+        if (str_contains($this->baseUrl, '?')) {
+            return $this->baseUrl . '&action=' . rawurlencode($action);
+        }
 
-        return $this->baseUrl . $separator . 'action=' . rawurlencode($action);
+        return rtrim($this->baseUrl, '/') . '/?action=' . rawurlencode($action);
     }
 
     private function responseStatusCode(array $headers): int

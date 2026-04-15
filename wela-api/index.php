@@ -96,6 +96,44 @@ try {
             ]);
             break;
 
+        case 'fetch_rows':
+            $table = wela_allowed_table($request['table'] ?? null, array_keys(wela_allowed_tables()));
+            $tableConfig = wela_allowed_tables()[$table];
+            $fields = wela_allowed_field_list($request['fields'] ?? null, $tableConfig['read_fields']);
+            $offset = max(0, (int) ($request['offset'] ?? 0));
+            $limit = min(2000, max(1, (int) ($request['limit'] ?? 500)));
+
+            if ($fields === []) {
+                $fields = $tableConfig['read_fields'];
+            }
+
+            $countStmt = $pdo->query(sprintf('SELECT COUNT(*) FROM `%s`', $table));
+            $total = (int) $countStmt->fetchColumn();
+
+            $stmt = $pdo->prepare(sprintf(
+                'SELECT %s FROM `%s` ORDER BY %s LIMIT %d OFFSET %d',
+                wela_select_columns($fields),
+                $table,
+                wela_order_clause($tableConfig['primary_key']),
+                $limit,
+                $offset
+            ));
+            $stmt->execute();
+            $rows = $stmt->fetchAll();
+            $nextOffset = ($offset + count($rows)) < $total ? ($offset + count($rows)) : null;
+
+            wela_respond(200, [
+                'ok' => true,
+                'data' => [
+                    'rows' => $rows,
+                    'offset' => $offset,
+                    'limit' => $limit,
+                    'total' => $total,
+                    'next_offset' => $nextOffset,
+                ],
+            ]);
+            break;
+
         case 'upsert_row':
             $table = wela_allowed_table($request['table'] ?? null, ['xt_media', 'xt_media_link']);
             $tableConfig = wela_allowed_tables()[$table];
@@ -425,7 +463,11 @@ function wela_allowed_tables(): array
     return [
         'xt_products' => [
             'primary_key' => 'products_id',
-            'read_fields' => ['products_id', 'external_id'],
+            'read_fields' => [
+                'products_id', 'external_id', 'products_model', 'products_ean', 'products_quantity',
+                'products_price', 'products_weight', 'products_status', 'products_master_flag',
+                'products_master_model', 'products_image', 'last_modified',
+            ],
             'write_fields' => [
                 'products_id', 'external_id', 'permission_id', 'products_owner', 'products_ean',
                 'products_quantity', 'show_stock', 'products_average_quantity', 'products_shippingtime',
@@ -442,7 +484,10 @@ function wela_allowed_tables(): array
         ],
         'xt_categories' => [
             'primary_key' => 'categories_id',
-            'read_fields' => ['categories_id', 'external_id'],
+            'read_fields' => [
+                'categories_id', 'external_id', 'parent_id', 'categories_level',
+                'categories_image', 'categories_master_image', 'categories_status', 'last_modified',
+            ],
             'write_fields' => [],
         ],
         'xt_products_description' => [
@@ -461,7 +506,7 @@ function wela_allowed_tables(): array
         ],
         'xt_media' => [
             'primary_key' => 'id',
-            'read_fields' => ['id', 'external_id'],
+            'read_fields' => ['id', 'external_id', 'file', 'type', 'class', 'status', 'last_modified'],
             'write_fields' => [
                 'id', 'file', 'type', 'class', 'download_status', 'status', 'owner',
                 'date_added', 'last_modified', 'max_dl_count', 'max_dl_days',
@@ -523,6 +568,28 @@ function wela_allowed_field(mixed $field, array $allowedFields): string
     return $field;
 }
 
+function wela_allowed_field_list(mixed $fields, array $allowedFields): array
+{
+    if ($fields === null) {
+        return [];
+    }
+
+    if (!is_array($fields)) {
+        wela_respond(400, [
+            'ok' => false,
+            'error' => 'Ungueltige XT-Feldliste.',
+        ]);
+    }
+
+    $validated = [];
+
+    foreach ($fields as $field) {
+        $validated[] = wela_allowed_field($field, $allowedFields);
+    }
+
+    return array_values(array_unique($validated));
+}
+
 function wela_allowed_field_map(mixed $values, array $allowedFields): array
 {
     if (!is_array($values)) {
@@ -557,6 +624,24 @@ function wela_allowed_field_map(mixed $values, array $allowedFields): array
     }
 
     return $sanitized;
+}
+
+function wela_select_columns(array $fields): string
+{
+    return implode(', ', array_map(
+        static fn (string $field): string => sprintf('`%s`', $field),
+        $fields
+    ));
+}
+
+function wela_order_clause(string|array $primaryKey): string
+{
+    $fields = is_array($primaryKey) ? $primaryKey : [$primaryKey];
+
+    return implode(', ', array_map(
+        static fn (string $field): string => sprintf('`%s` ASC', $field),
+        $fields
+    ));
 }
 
 function wela_upsert_row(PDO $pdo, string $table, string|array $primaryKey, array $identity, array $columns): array

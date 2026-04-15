@@ -12,6 +12,7 @@ final class SyncLauncher
         'import_categories' => 'php /app/run_import_categories.php',
         'merge' => 'php /app/run_merge.php',
         'expand' => 'php /app/run_expand.php',
+        'xt_snapshot' => 'php /app/run_xt_snapshot.php',
         'delta' => 'php /app/run_delta.php',
         'export_queue_worker' => 'php /app/run_export_queue.php',
         'full_pipeline' => 'php /app/run_full_pipeline.php',

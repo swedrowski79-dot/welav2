@@ -234,6 +234,89 @@ CREATE TABLE IF NOT EXISTS stage_product_documents (
     KEY idx_stage_product_documents_hash (hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS xt_products_snapshot (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    xt_products_id INT NULL,
+    external_id VARCHAR(255) NULL,
+    afs_artikel_id INT NULL,
+    sku VARCHAR(255) NULL,
+    ean VARCHAR(255) NULL,
+    stock DECIMAL(18,4) NULL,
+    price DECIMAL(18,4) NULL,
+    weight DECIMAL(18,4) NULL,
+    online_flag INT NULL,
+    is_master TINYINT NULL,
+    master_sku VARCHAR(255) NULL,
+    image VARCHAR(255) NULL,
+    last_modified DATETIME NULL,
+    snapshot_hash VARCHAR(64) NULL,
+    imported_at DATETIME NOT NULL,
+    UNIQUE KEY uniq_xt_products_snapshot_external_id (external_id),
+    KEY idx_xt_products_snapshot_afs_artikel_id (afs_artikel_id),
+    KEY idx_xt_products_snapshot_hash (snapshot_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS xt_categories_snapshot (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    xt_categories_id INT NULL,
+    external_id VARCHAR(255) NULL,
+    afs_wg_id INT NULL,
+    parent_xt_id INT NULL,
+    parent_external_id VARCHAR(255) NULL,
+    parent_afs_id INT NULL,
+    level INT NULL,
+    image VARCHAR(255) NULL,
+    header_image VARCHAR(255) NULL,
+    online_flag INT NULL,
+    last_modified DATETIME NULL,
+    snapshot_hash VARCHAR(64) NULL,
+    imported_at DATETIME NOT NULL,
+    UNIQUE KEY uniq_xt_categories_snapshot_external_id (external_id),
+    KEY idx_xt_categories_snapshot_afs_wg_id (afs_wg_id),
+    KEY idx_xt_categories_snapshot_parent_afs_id (parent_afs_id),
+    KEY idx_xt_categories_snapshot_hash (snapshot_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS xt_media_snapshot (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    xt_media_id INT NULL,
+    xt_products_id INT NULL,
+    media_external_id VARCHAR(255) NULL,
+    afs_artikel_id INT NULL,
+    file_name VARCHAR(255) NULL,
+    media_type VARCHAR(50) NULL,
+    class VARCHAR(50) NULL,
+    sort_order INT NULL,
+    status INT NULL,
+    last_modified DATETIME NULL,
+    snapshot_hash VARCHAR(64) NULL,
+    imported_at DATETIME NOT NULL,
+    UNIQUE KEY uniq_xt_media_snapshot_external_id (media_external_id),
+    KEY idx_xt_media_snapshot_afs_artikel_id (afs_artikel_id),
+    KEY idx_xt_media_snapshot_hash (snapshot_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS xt_documents_snapshot (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    xt_media_id INT NULL,
+    xt_products_id INT NULL,
+    document_external_id VARCHAR(255) NULL,
+    afs_document_id INT NULL,
+    afs_artikel_id INT NULL,
+    file_name VARCHAR(255) NULL,
+    document_type VARCHAR(50) NULL,
+    class VARCHAR(50) NULL,
+    sort_order INT NULL,
+    status INT NULL,
+    last_modified DATETIME NULL,
+    snapshot_hash VARCHAR(64) NULL,
+    imported_at DATETIME NOT NULL,
+    UNIQUE KEY uniq_xt_documents_snapshot_external_id (document_external_id),
+    KEY idx_xt_documents_snapshot_afs_document_id (afs_document_id),
+    KEY idx_xt_documents_snapshot_afs_artikel_id (afs_artikel_id),
+    KEY idx_xt_documents_snapshot_hash (snapshot_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS sync_runs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     run_type VARCHAR(100) NOT NULL,

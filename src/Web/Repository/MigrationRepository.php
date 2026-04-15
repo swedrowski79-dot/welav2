@@ -141,6 +141,13 @@ final class MigrationRepository
                 && $this->tableExists('product_document_export_state');
         }
 
+        if ($version === '012_create_xt_snapshot_tables') {
+            return $this->tableExists('xt_products_snapshot')
+                && $this->tableExists('xt_categories_snapshot')
+                && $this->tableExists('xt_media_snapshot')
+                && $this->tableExists('xt_documents_snapshot');
+        }
+
         return false;
     }
 
