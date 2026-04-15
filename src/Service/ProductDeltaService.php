@@ -21,6 +21,13 @@ class ProductDeltaService
     private array $payloadFields;
     private array $removedPayload;
     private string $monitorSource;
+    private ?string $snapshotTable = null;
+    private ?string $snapshotIdentityField = null;
+    private array $snapshotCompareFields = [];
+    private ?string $snapshotTranslationHashField = null;
+    private ?string $snapshotAttributeHashField = null;
+    private ?string $snapshotSeoHashField = null;
+    private bool $snapshotRequireSuccessRun = true;
     private array $pendingQueueEntities = [];
     private array $queuedEntries = [];
 
@@ -48,6 +55,9 @@ class ProductDeltaService
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
         $states = $this->fetchStates();
+        $snapshotContext = $this->fetchSnapshots();
+        $snapshots = $snapshotContext['rows'];
+        $snapshotEnabled = (bool) ($snapshotContext['enabled'] ?? false);
         $initialQueueCounts = $this->fetchQueueCounts();
         $this->pendingQueueEntities = $this->fetchExistingQueueEntities();
         $this->queuedEntries = [];
@@ -60,6 +70,11 @@ class ProductDeltaService
             'unchanged' => 0,
             'deduplicated' => 0,
             'errors' => 0,
+            'snapshot_matched' => 0,
+            'snapshot_missing' => 0,
+            'snapshot_mismatched' => 0,
+            'snapshot_removed_skipped' => 0,
+            'snapshot_enabled' => $snapshotEnabled,
         ];
 
         $currentEntityIds = [];
@@ -72,9 +87,17 @@ class ProductDeltaService
              ON DUPLICATE KEY UPDATE
                 `{$this->stateLastSeenField}` = VALUES(`{$this->stateLastSeenField}`)"
         );
+        $syncStateStmt = $this->stageDb->prepare(
+            "INSERT INTO `{$this->stateTable}` (`{$this->stateIdentityField}`, `{$this->stateHashField}`, `{$this->stateLastSeenField}`)
+             VALUES (:state_id, :hash, :last_seen_at)
+             ON DUPLICATE KEY UPDATE
+                `{$this->stateHashField}` = VALUES(`{$this->stateHashField}`),
+                `{$this->stateLastSeenField}` = VALUES(`{$this->stateLastSeenField}`)"
+        );
         $markRemovedStateStmt = $this->stageDb->prepare(
             "UPDATE `{$this->stateTable}`
-             SET `{$this->stateHashField}` = :hash
+             SET `{$this->stateHashField}` = :hash,
+                 `{$this->stateLastSeenField}` = :last_seen_at
              WHERE `{$this->stateIdentityField}` = :state_id"
         );
 
@@ -101,26 +124,43 @@ class ProductDeltaService
                 ]);
 
                 $state = $states[$entityId] ?? null;
-                if ($state === null) {
-                    if ($this->enqueue($entityId, 'insert', $payloadData, $hash)) {
-                        $stats['insert']++;
+                $snapshotDecision = $this->snapshotDecision($entityId, $payloadData, $snapshots[$entityId] ?? null, $snapshotEnabled);
+
+                if ($snapshotEnabled) {
+                    if ($snapshotDecision['matched']) {
+                        $stats['snapshot_matched']++;
+                    } elseif ($snapshotDecision['exists']) {
+                        $stats['snapshot_mismatched']++;
                     } else {
-                        $stats['deduplicated']++;
+                        $stats['snapshot_missing']++;
                     }
-                } elseif (($state[$this->stateHashField] ?? null) !== $hash) {
-                    if ($this->enqueue($entityId, 'update', $payloadData, $hash)) {
-                        $stats['update']++;
-                    } else {
-                        $stats['deduplicated']++;
-                    }
-                } else {
-                    $stats['unchanged']++;
                 }
 
-                $upsertStateStmt->execute([
-                    ':state_id' => $entityId,
-                    ':last_seen_at' => $runTimestamp,
-                ]);
+                if ($snapshotDecision['matched']) {
+                    $stats['unchanged']++;
+                    $syncStateStmt->execute([
+                        ':state_id' => $entityId,
+                        ':hash' => $hash,
+                        ':last_seen_at' => $runTimestamp,
+                    ]);
+                } else {
+                    $action = $this->nextAction($state, $hash, $snapshotDecision);
+
+                    if ($action !== null) {
+                        if ($this->enqueue($entityId, $action, $payloadData, $hash)) {
+                            $stats[$action]++;
+                        } else {
+                            $stats['deduplicated']++;
+                        }
+                    } else {
+                        $stats['unchanged']++;
+                    }
+
+                    $upsertStateStmt->execute([
+                        ':state_id' => $entityId,
+                        ':last_seen_at' => $runTimestamp,
+                    ]);
+                }
             } catch (Throwable $exception) {
                 $stats['errors']++;
                 $this->logRecordError(
@@ -140,11 +180,23 @@ class ProductDeltaService
                 continue;
             }
 
+            if ($snapshotEnabled && !isset($snapshots[$entityId])) {
+                $syncStateStmt->execute([
+                    ':state_id' => $entityId,
+                    ':hash' => $this->removedHash,
+                    ':last_seen_at' => $runTimestamp,
+                ]);
+                $stats['snapshot_removed_skipped']++;
+                $stats['unchanged']++;
+                continue;
+            }
+
             try {
                 if ($this->enqueueRemovedUpdate($entityId)) {
                     $markRemovedStateStmt->execute([
                         ':hash' => $this->removedHash,
                         ':state_id' => $entityId,
+                        ':last_seen_at' => $runTimestamp,
                     ]);
                     $stats['removed']++;
                 } else {
@@ -182,6 +234,11 @@ class ProductDeltaService
                 'removed' => $stats['removed'],
                 'deduplicated' => $stats['deduplicated'],
                 'errors' => $stats['errors'],
+                'snapshot_enabled' => $stats['snapshot_enabled'],
+                'snapshot_matched' => $stats['snapshot_matched'],
+                'snapshot_missing' => $stats['snapshot_missing'],
+                'snapshot_mismatched' => $stats['snapshot_mismatched'],
+                'snapshot_removed_skipped' => $stats['snapshot_removed_skipped'],
                 'pending_before' => $stats['pending_before'],
                 'processing_before' => $stats['processing_before'],
                 'pending_after' => $stats['pending_after'],
@@ -198,6 +255,11 @@ class ProductDeltaService
                 'pending_after' => $stats['pending_after'],
                 'processing_after' => $stats['processing_after'],
                 'deduplicated' => $stats['deduplicated'],
+                'snapshot_enabled' => $stats['snapshot_enabled'],
+                'snapshot_matched' => $stats['snapshot_matched'],
+                'snapshot_missing' => $stats['snapshot_missing'],
+                'snapshot_mismatched' => $stats['snapshot_mismatched'],
+                'snapshot_removed_skipped' => $stats['snapshot_removed_skipped'],
                 'result_reason' => $stats['result_reason'],
             ]);
         }
@@ -230,6 +292,14 @@ class ProductDeltaService
         $this->payloadFields = is_array($config['payload_fields'] ?? null) ? $config['payload_fields'] : [];
         $this->removedPayload = is_array($config['removed_payload'] ?? null) ? $config['removed_payload'] : ['online' => 0];
         $this->monitorSource = (string) ($config['monitor_source'] ?? 'delta_' . $this->entityType);
+        $this->snapshotTable = $this->normalizeTableName($config['snapshot_table'] ?? null);
+        $this->snapshotIdentityField = is_string($config['snapshot_identity_field'] ?? null) ? trim((string) $config['snapshot_identity_field']) : null;
+        $this->snapshotCompareFields = is_array($config['snapshot_compare_fields'] ?? null) ? $config['snapshot_compare_fields'] : [];
+        $this->snapshotTranslationHashField = $this->normalizeFieldName($config['snapshot_translation_hash_field'] ?? null);
+        $this->snapshotAttributeHashField = $this->normalizeFieldName($config['snapshot_attribute_hash_field'] ?? null);
+        $this->snapshotSeoHashField = $this->normalizeFieldName($config['snapshot_seo_hash_field'] ?? null);
+        $this->snapshotRequireSuccessRun = !array_key_exists('snapshot_require_success_run', $config)
+            || (bool) $config['snapshot_require_success_run'];
     }
 
     private function normalizeTableName(mixed $value): ?string
@@ -241,6 +311,17 @@ class ProductDeltaService
         $table = trim($value);
 
         return $table === '' ? null : $table;
+    }
+
+    private function normalizeFieldName(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $field = trim($value);
+
+        return $field === '' ? null : $field;
     }
 
     private function fetchEntities(): array
@@ -340,6 +421,63 @@ class ProductDeltaService
         return $states;
     }
 
+    private function fetchSnapshots(): array
+    {
+        if ($this->snapshotTable === null || $this->snapshotIdentityField === null) {
+            return ['enabled' => false, 'rows' => []];
+        }
+
+        if ($this->snapshotRequireSuccessRun && !$this->hasSuccessfulSnapshotRun()) {
+            return ['enabled' => false, 'rows' => []];
+        }
+
+        try {
+            $stmt = $this->stageDb->query(
+                "SELECT * FROM `{$this->snapshotTable}` ORDER BY `{$this->snapshotIdentityField}` ASC"
+            );
+        } catch (Throwable $exception) {
+            if ($this->monitor !== null) {
+                $this->monitor->log($this->runId, 'warning', "{$this->entityLabel}-Snapshot konnte nicht gelesen werden.", [
+                    'entity_type' => $this->entityType,
+                    'table' => $this->snapshotTable,
+                    'exception' => $exception->getMessage(),
+                ]);
+            }
+
+            return ['enabled' => false, 'rows' => []];
+        }
+
+        $rows = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $entityId = $this->normalizeEntityId($row[$this->snapshotIdentityField] ?? null);
+            if ($entityId === null) {
+                continue;
+            }
+
+            $rows[$entityId] = $row;
+        }
+
+        return ['enabled' => true, 'rows' => $rows];
+    }
+
+    private function hasSuccessfulSnapshotRun(): bool
+    {
+        $stmt = $this->stageDb->prepare(
+            "SELECT 1
+             FROM `sync_runs`
+             WHERE run_type = :run_type
+               AND status = :status
+             ORDER BY id DESC
+             LIMIT 1"
+        );
+        $stmt->execute([
+            ':run_type' => 'xt_snapshot',
+            ':status' => 'success',
+        ]);
+
+        return (bool) $stmt->fetchColumn();
+    }
+
     private function buildPayloadData(array $entity, array $translations, array $attributes): array
     {
         if ($this->payloadFields !== []) {
@@ -372,6 +510,88 @@ class ProductDeltaService
         }
 
         return hash('sha256', $json);
+    }
+
+    private function snapshotDecision(string $entityId, array $payloadData, ?array $snapshotRow, bool $snapshotEnabled): array
+    {
+        if (!$snapshotEnabled) {
+            return ['enabled' => false, 'matched' => false, 'exists' => false];
+        }
+
+        if ($snapshotRow === null) {
+            return ['enabled' => true, 'matched' => false, 'exists' => false];
+        }
+
+        foreach ($this->snapshotCompareFields as $payloadPath => $snapshotField) {
+            if (!is_string($payloadPath) || !is_string($snapshotField)) {
+                continue;
+            }
+
+            $payloadValue = $this->normalizeScalar($this->extractPayloadPath($payloadData, $payloadPath));
+            $snapshotValue = $this->normalizeScalar($snapshotRow[$snapshotField] ?? null);
+
+            if (!$this->valuesEqual($payloadValue, $snapshotValue)) {
+                return ['enabled' => true, 'matched' => false, 'exists' => true];
+            }
+        }
+
+        if ($this->snapshotTranslationHashField !== null) {
+            if (!$this->valuesEqual(
+                $this->buildStageTranslationHash($payloadData['translations'] ?? []),
+                $this->normalizeScalar($snapshotRow[$this->snapshotTranslationHashField] ?? null)
+            )) {
+                return ['enabled' => true, 'matched' => false, 'exists' => true];
+            }
+        }
+
+        if ($this->snapshotAttributeHashField !== null) {
+            if (!$this->valuesEqual(
+                $this->buildStageAttributeHash($payloadData['attributes'] ?? []),
+                $this->normalizeScalar($snapshotRow[$this->snapshotAttributeHashField] ?? null)
+            )) {
+                return ['enabled' => true, 'matched' => false, 'exists' => true];
+            }
+        }
+
+        if ($this->snapshotSeoHashField !== null) {
+            if (!$this->valuesEqual(
+                $this->buildStageSeoHash($payloadData['translations'] ?? []),
+                $this->normalizeScalar($snapshotRow[$this->snapshotSeoHashField] ?? null)
+            )) {
+                return ['enabled' => true, 'matched' => false, 'exists' => true];
+            }
+        }
+
+        return ['enabled' => true, 'matched' => true, 'exists' => true];
+    }
+
+    private function nextAction(?array $state, string $hash, array $snapshotDecision): ?string
+    {
+        if (!(bool) ($snapshotDecision['enabled'] ?? false)) {
+            if ($state === null) {
+                return 'insert';
+            }
+
+            if (($state[$this->stateHashField] ?? null) !== $hash) {
+                return 'update';
+            }
+
+            return null;
+        }
+
+        if (!$snapshotDecision['exists']) {
+            return 'insert';
+        }
+
+        if ($state === null) {
+            return 'update';
+        }
+
+        if (($state[$this->stateHashField] ?? null) !== $hash) {
+            return 'update';
+        }
+
+        return 'update';
     }
 
     private function enqueue(string $entityId, string $action, array $payloadData, string $hash): bool
@@ -597,6 +817,130 @@ class ProductDeltaService
 
         $stringValue = trim((string) $value);
         return $stringValue === '' ? null : $stringValue;
+    }
+
+    private function extractPayloadPath(array $payload, string $path): mixed
+    {
+        $segments = array_values(array_filter(explode('.', $path), static fn (string $segment): bool => $segment !== ''));
+        $current = $payload;
+
+        foreach ($segments as $segment) {
+            if (!is_array($current) || !array_key_exists($segment, $current)) {
+                return null;
+            }
+
+            $current = $current[$segment];
+        }
+
+        return $current;
+    }
+
+    private function buildStageTranslationHash(mixed $translations): ?string
+    {
+        if (!is_array($translations) || $translations === []) {
+            return null;
+        }
+
+        $normalized = [];
+        foreach ($translations as $translation) {
+            if (!is_array($translation)) {
+                continue;
+            }
+
+            $languageCode = $this->normalizeString($translation['language_code'] ?? null);
+            if ($languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'language_code' => $languageCode,
+                'name' => $this->normalizeScalar($translation['name'] ?? null),
+                'description' => $this->normalizeScalar($translation['description'] ?? null),
+                'short_description' => $this->normalizeScalar($translation['short_description'] ?? null),
+            ];
+        }
+
+        return $this->hashComparableRows($normalized);
+    }
+
+    private function buildStageSeoHash(mixed $translations): ?string
+    {
+        if (!is_array($translations) || $translations === []) {
+            return null;
+        }
+
+        $normalized = [];
+        foreach ($translations as $translation) {
+            if (!is_array($translation)) {
+                continue;
+            }
+
+            $languageCode = $this->normalizeString($translation['language_code'] ?? null);
+            if ($languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'language_code' => $languageCode,
+                'meta_title' => $this->normalizeScalar($translation['meta_title'] ?? null),
+                'meta_description' => $this->normalizeScalar($translation['meta_description'] ?? null),
+            ];
+        }
+
+        return $this->hashComparableRows($normalized);
+    }
+
+    private function buildStageAttributeHash(mixed $attributes): ?string
+    {
+        if (!is_array($attributes) || $attributes === []) {
+            return null;
+        }
+
+        $normalized = [];
+        foreach ($attributes as $attribute) {
+            if (!is_array($attribute)) {
+                continue;
+            }
+
+            $languageCode = $this->normalizeString($attribute['language_code'] ?? null);
+            if ($languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'language_code' => $languageCode,
+                'sort_order' => isset($attribute['sort_order']) ? (int) $attribute['sort_order'] : null,
+                'attribute_name' => $this->normalizeScalar($attribute['attribute_name'] ?? null),
+                'attribute_value' => $this->normalizeScalar($attribute['attribute_value'] ?? null),
+            ];
+        }
+
+        return $this->hashComparableRows($normalized);
+    }
+
+    private function hashComparableRows(array $rows): ?string
+    {
+        if ($rows === []) {
+            return null;
+        }
+
+        usort($rows, static function (array $left, array $right): int {
+            return strcmp(
+                json_encode($left, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '',
+                json_encode($right, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
+            );
+        });
+
+        return hash('sha256', json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]');
+    }
+
+    private function valuesEqual(mixed $left, mixed $right): bool
+    {
+        if ($left === null || $right === null) {
+            return $left === $right;
+        }
+
+        return (string) $left === (string) $right;
     }
 
     private function normalizeString(mixed $value): ?string

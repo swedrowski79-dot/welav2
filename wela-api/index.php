@@ -492,7 +492,10 @@ function wela_allowed_tables(): array
         ],
         'xt_products_description' => [
             'primary_key' => ['products_id', 'language_code'],
-            'read_fields' => ['products_id', 'language_code'],
+            'read_fields' => [
+                'products_id', 'language_code', 'products_name',
+                'products_description', 'products_short_description', 'products_store_id',
+            ],
             'write_fields' => [
                 'products_id', 'language_code', 'reload_st', 'products_name',
                 'products_description', 'products_short_description', 'products_keywords',
@@ -501,7 +504,7 @@ function wela_allowed_tables(): array
         ],
         'xt_products_to_categories' => [
             'primary_key' => ['products_id', 'categories_id'],
-            'read_fields' => ['products_id', 'categories_id'],
+            'read_fields' => ['products_id', 'categories_id', 'master_link', 'store_id'],
             'write_fields' => ['products_id', 'categories_id', 'master_link', 'store_id'],
         ],
         'xt_media' => [
@@ -520,17 +523,17 @@ function wela_allowed_tables(): array
         ],
         'xt_plg_products_attributes' => [
             'primary_key' => 'attributes_id',
-            'read_fields' => ['attributes_id', 'attributes_model'],
+            'read_fields' => ['attributes_id', 'attributes_parent', 'attributes_model', 'sort_order', 'status'],
             'write_fields' => ['attributes_id', 'attributes_parent', 'attributes_model', 'sort_order', 'status'],
         ],
         'xt_plg_products_attributes_description' => [
             'primary_key' => ['attributes_id', 'language_code'],
-            'read_fields' => ['attributes_id', 'language_code'],
+            'read_fields' => ['attributes_id', 'language_code', 'attributes_name', 'attributes_desc'],
             'write_fields' => ['attributes_id', 'language_code', 'attributes_name', 'attributes_desc'],
         ],
         'xt_plg_products_to_attributes' => [
             'primary_key' => ['products_id', 'attributes_id'],
-            'read_fields' => ['products_id', 'attributes_id'],
+            'read_fields' => ['products_id', 'attributes_id', 'attributes_parent_id'],
             'write_fields' => ['products_id', 'attributes_id', 'attributes_parent_id'],
         ],
         'xt_seo_url' => [

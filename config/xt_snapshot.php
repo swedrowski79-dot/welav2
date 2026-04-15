@@ -35,6 +35,26 @@ return [
                     'last_modified',
                 ],
             ],
+            'products_to_categories' => [
+                'table' => 'xt_products_to_categories',
+                'fields' => [
+                    'products_id',
+                    'categories_id',
+                    'master_link',
+                    'store_id',
+                ],
+            ],
+            'products_description' => [
+                'table' => 'xt_products_description',
+                'fields' => [
+                    'products_id',
+                    'language_code',
+                    'products_name',
+                    'products_description',
+                    'products_short_description',
+                    'products_store_id',
+                ],
+            ],
             'media' => [
                 'table' => 'xt_media',
                 'fields' => [
@@ -56,6 +76,47 @@ return [
                     'class',
                     'type',
                     'sort_order',
+                ],
+            ],
+            'product_attributes' => [
+                'table' => 'xt_plg_products_attributes',
+                'fields' => [
+                    'attributes_id',
+                    'attributes_parent',
+                    'attributes_model',
+                    'sort_order',
+                    'status',
+                ],
+            ],
+            'product_attribute_descriptions' => [
+                'table' => 'xt_plg_products_attributes_description',
+                'fields' => [
+                    'attributes_id',
+                    'language_code',
+                    'attributes_name',
+                    'attributes_desc',
+                ],
+            ],
+            'products_to_attributes' => [
+                'table' => 'xt_plg_products_to_attributes',
+                'fields' => [
+                    'products_id',
+                    'attributes_id',
+                    'attributes_parent_id',
+                ],
+            ],
+            'seo_urls' => [
+                'table' => 'xt_seo_url',
+                'fields' => [
+                    'url_md5',
+                    'url_text',
+                    'language_code',
+                    'link_type',
+                    'link_id',
+                    'meta_title',
+                    'meta_description',
+                    'meta_keywords',
+                    'store_id',
                 ],
             ],
         ],

@@ -148,6 +148,13 @@ final class MigrationRepository
                 && $this->tableExists('xt_documents_snapshot');
         }
 
+        if ($version === '013_add_xt_product_snapshot_compare_fields') {
+            return $this->columnExists('xt_products_snapshot', 'category_afs_id')
+                && $this->columnExists('xt_products_snapshot', 'translation_hash')
+                && $this->columnExists('xt_products_snapshot', 'attribute_hash')
+                && $this->columnExists('xt_products_snapshot', 'seo_hash');
+        }
+
         return false;
     }
 

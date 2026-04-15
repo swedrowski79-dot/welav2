@@ -32,14 +32,35 @@ final class XtSnapshotService
         $this->xtApiClient->health();
         $this->log('info', 'XT-API fuer Snapshot-Import erreichbar.');
 
-        $productsSource = $this->fetchAll('products');
         $categoriesSource = $this->fetchAll('categories');
+        $productCategoryLinksSource = $this->fetchAll('products_to_categories');
+        $productDescriptionsSource = $this->fetchAll('products_description');
+        $productAttributesSource = $this->fetchAll('product_attributes');
+        $productAttributeDescriptionsSource = $this->fetchAll('product_attribute_descriptions');
+        $productToAttributesSource = $this->fetchAll('products_to_attributes');
+        $seoUrlsSource = $this->fetchAll('seo_urls');
+        $productsSource = $this->fetchAll('products');
         $mediaSource = $this->fetchAll('media');
         $mediaLinksSource = $this->fetchAll('media_links');
         $importedAt = date('Y-m-d H:i:s');
 
-        [$productSnapshots, $productIdMap, $productStats] = $this->buildProductSnapshots($productsSource['rows'], $importedAt);
-        [$categorySnapshots, $categoryStats] = $this->buildCategorySnapshots($categoriesSource['rows'], $importedAt);
+        [$categorySnapshots, $categoryStats, $categoryExternalById] = $this->buildCategorySnapshots($categoriesSource['rows'], $importedAt);
+        $productCategoryMap = $this->buildProductCategoryMap($productCategoryLinksSource['rows'], $categoryExternalById);
+        $productTranslationHashes = $this->buildProductTranslationHashes($productDescriptionsSource['rows']);
+        $productAttributeHashes = $this->buildProductAttributeHashes(
+            $productAttributesSource['rows'],
+            $productAttributeDescriptionsSource['rows'],
+            $productToAttributesSource['rows']
+        );
+        $productSeoHashes = $this->buildProductSeoHashes($seoUrlsSource['rows']);
+        [$productSnapshots, $productIdMap, $productStats] = $this->buildProductSnapshots(
+            $productsSource['rows'],
+            $productCategoryMap,
+            $productTranslationHashes,
+            $productAttributeHashes,
+            $productSeoHashes,
+            $importedAt
+        );
         [$mediaSnapshots, $documentSnapshots, $mediaStats] = $this->buildMediaAndDocumentSnapshots(
             $mediaSource['rows'],
             $mediaLinksSource['rows'],
@@ -74,8 +95,14 @@ final class XtSnapshotService
             'source_counts' => [
                 'xt_products' => $productsSource['total'],
                 'xt_categories' => $categoriesSource['total'],
+                'xt_products_to_categories' => $productCategoryLinksSource['total'],
+                'xt_products_description' => $productDescriptionsSource['total'],
                 'xt_media' => $mediaSource['total'],
                 'xt_media_link' => $mediaLinksSource['total'],
+                'xt_plg_products_attributes' => $productAttributesSource['total'],
+                'xt_plg_products_attributes_description' => $productAttributeDescriptionsSource['total'],
+                'xt_plg_products_to_attributes' => $productToAttributesSource['total'],
+                'xt_seo_url' => $seoUrlsSource['total'],
             ],
             'skipped' => [
                 'products_without_external_id' => $productStats['without_external_id'],
@@ -155,7 +182,14 @@ final class XtSnapshotService
         ];
     }
 
-    private function buildProductSnapshots(array $rows, string $importedAt): array
+    private function buildProductSnapshots(
+        array $rows,
+        array $productCategoryMap,
+        array $productTranslationHashes,
+        array $productAttributeHashes,
+        array $productSeoHashes,
+        string $importedAt
+    ): array
     {
         $snapshots = [];
         $productIdMap = [];
@@ -166,6 +200,7 @@ final class XtSnapshotService
                 continue;
             }
 
+            $productId = $this->nullableInt($row['products_id'] ?? null);
             $externalId = $this->trimString($row['external_id'] ?? null);
             if ($externalId === null) {
                 $withoutExternalId++;
@@ -176,6 +211,7 @@ final class XtSnapshotService
                 'xt_products_id' => $this->nullableInt($row['products_id'] ?? null),
                 'external_id' => $externalId,
                 'afs_artikel_id' => $this->nullableInt($externalId),
+                'category_afs_id' => $productCategoryMap[$productId ?? -1] ?? null,
                 'sku' => $this->trimString($row['products_model'] ?? null),
                 'ean' => $this->trimString($row['products_ean'] ?? null),
                 'stock' => $this->nullableNumeric($row['products_quantity'] ?? null),
@@ -185,6 +221,9 @@ final class XtSnapshotService
                 'is_master' => $this->nullableInt($row['products_master_flag'] ?? null),
                 'master_sku' => $this->trimString($row['products_master_model'] ?? null),
                 'image' => $this->trimString($row['products_image'] ?? null),
+                'translation_hash' => $productTranslationHashes[$productId ?? -1] ?? null,
+                'attribute_hash' => $productAttributeHashes[$productId ?? -1] ?? null,
+                'seo_hash' => $productSeoHashes[$productId ?? -1] ?? null,
                 'last_modified' => $this->trimString($row['last_modified'] ?? null),
                 'imported_at' => $importedAt,
             ];
@@ -192,7 +231,6 @@ final class XtSnapshotService
 
             $snapshots[] = $snapshot;
 
-            $productId = $this->nullableInt($row['products_id'] ?? null);
             if ($productId !== null) {
                 $productIdMap[$productId] = $externalId;
             }
@@ -252,7 +290,7 @@ final class XtSnapshotService
             $snapshots[] = $snapshot;
         }
 
-        return [$snapshots, ['without_external_id' => $withoutExternalId]];
+        return [$snapshots, ['without_external_id' => $withoutExternalId], $categoryExternalById];
     }
 
     private function buildMediaAndDocumentSnapshots(array $mediaRows, array $linkRows, array $productIdMap, string $importedAt): array
@@ -348,6 +386,191 @@ final class XtSnapshotService
         }
 
         return [$mediaSnapshots, $documentSnapshots, $stats];
+    }
+
+    private function buildProductCategoryMap(array $rows, array $categoryExternalById): array
+    {
+        $map = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $productId = $this->nullableInt($row['products_id'] ?? null);
+            $categoryId = $this->nullableInt($row['categories_id'] ?? null);
+            if ($productId === null || $categoryId === null || isset($map[$productId])) {
+                continue;
+            }
+
+            $categoryExternalId = $categoryExternalById[$categoryId] ?? null;
+            $map[$productId] = $this->nullableInt($categoryExternalId);
+        }
+
+        return $map;
+    }
+
+    private function buildProductTranslationHashes(array $rows): array
+    {
+        $grouped = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $productId = $this->nullableInt($row['products_id'] ?? null);
+            $languageCode = $this->trimString($row['language_code'] ?? null);
+
+            if ($productId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $grouped[$productId][] = [
+                'language_code' => $languageCode,
+                'name' => $this->trimString($row['products_name'] ?? null),
+                'description' => $this->trimString($row['products_description'] ?? null),
+                'short_description' => $this->trimString($row['products_short_description'] ?? null),
+            ];
+        }
+
+        return $this->hashGroupedRows($grouped, ['language_code', 'name', 'description', 'short_description']);
+    }
+
+    private function buildProductSeoHashes(array $rows): array
+    {
+        $grouped = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            if ((int) ($row['link_type'] ?? 0) !== 1) {
+                continue;
+            }
+
+            $productId = $this->nullableInt($row['link_id'] ?? null);
+            $languageCode = $this->trimString($row['language_code'] ?? null);
+
+            if ($productId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $grouped[$productId][] = [
+                'language_code' => $languageCode,
+                'meta_title' => $this->trimString($row['meta_title'] ?? null),
+                'meta_description' => $this->trimString($row['meta_description'] ?? null),
+            ];
+        }
+
+        return $this->hashGroupedRows($grouped, ['language_code', 'meta_title', 'meta_description']);
+    }
+
+    private function buildProductAttributeHashes(array $attributeRows, array $descriptionRows, array $relationRows): array
+    {
+        $attributeEntities = [];
+        foreach ($attributeRows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $attributeId = $this->nullableInt($row['attributes_id'] ?? null);
+            if ($attributeId === null) {
+                continue;
+            }
+
+            $attributeEntities[$attributeId] = [
+                'sort_order' => $this->nullableInt($row['sort_order'] ?? null),
+            ];
+        }
+
+        $attributeDescriptions = [];
+        foreach ($descriptionRows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $attributeId = $this->nullableInt($row['attributes_id'] ?? null);
+            $languageCode = $this->trimString($row['language_code'] ?? null);
+
+            if ($attributeId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $attributeDescriptions[$attributeId][$languageCode] = [
+                'attribute_name' => $this->trimString($row['attributes_name'] ?? null),
+                'attribute_value' => $this->trimString($row['attributes_desc'] ?? null),
+            ];
+        }
+
+        $grouped = [];
+        foreach ($relationRows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $productId = $this->nullableInt($row['products_id'] ?? null);
+            $attributeId = $this->nullableInt($row['attributes_id'] ?? null);
+
+            if ($productId === null || $attributeId === null || !isset($attributeEntities[$attributeId])) {
+                continue;
+            }
+
+            foreach ($attributeDescriptions[$attributeId] ?? [] as $languageCode => $description) {
+                if (($description['attribute_name'] ?? null) === null && ($description['attribute_value'] ?? null) === null) {
+                    continue;
+                }
+
+                $grouped[$productId][] = [
+                    'language_code' => $languageCode,
+                    'sort_order' => $attributeEntities[$attributeId]['sort_order'],
+                    'attribute_name' => $description['attribute_name'] ?? null,
+                    'attribute_value' => $description['attribute_value'] ?? null,
+                ];
+            }
+        }
+
+        return $this->hashGroupedRows($grouped, ['language_code', 'sort_order', 'attribute_name', 'attribute_value']);
+    }
+
+    private function hashGroupedRows(array $groupedRows, array $fields): array
+    {
+        $hashes = [];
+
+        foreach ($groupedRows as $entityId => $rows) {
+            if (!is_array($rows) || $rows === []) {
+                continue;
+            }
+
+            $normalizedRows = [];
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $normalized = [];
+                foreach ($fields as $field) {
+                    $normalized[$field] = $row[$field] ?? null;
+                }
+
+                $normalizedRows[] = $normalized;
+            }
+
+            usort($normalizedRows, static function (array $left, array $right): int {
+                return strcmp(
+                    json_encode($left, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '',
+                    json_encode($right, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
+                );
+            });
+
+            $hashes[(int) $entityId] = hash(
+                'sha256',
+                json_encode($normalizedRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]'
+            );
+        }
+
+        return $hashes;
     }
 
     private function insertBatches(string $table, array $rows): void
