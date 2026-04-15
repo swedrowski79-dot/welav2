@@ -3,7 +3,11 @@
 require __DIR__ . '/src/Database/ConnectionFactory.php';
 require __DIR__ . '/src/Monitoring/SyncMonitor.php';
 require __DIR__ . '/src/Service/ExportQueueWorker.php';
+require __DIR__ . '/src/Service/XtQueueWriter.php';
 require __DIR__ . '/src/Service/WelaApiClient.php';
+require __DIR__ . '/src/Service/AbstractXtWriter.php';
+require __DIR__ . '/src/Service/XtCompositeWriter.php';
+require __DIR__ . '/src/Service/XtProductWriter.php';
 require __DIR__ . '/src/Service/XtMediaDocumentWriter.php';
 
 $configSources = require __DIR__ . '/config/sources.php';
@@ -18,7 +22,10 @@ $runId = $monitor->start('export_queue_worker', [
 
 try {
     $monitor->log($runId, 'info', 'Export Queue Worker gestartet.');
-    $xtWriter = new XtMediaDocumentWriter($configSources, $configXtWrite);
+    $xtWriter = new XtCompositeWriter([
+        new XtProductWriter($configSources, $configXtWrite),
+        new XtMediaDocumentWriter($configSources, $configXtWrite),
+    ]);
     $stats = (new ExportQueueWorker($stageDb, $configDelta, $monitor, $runId, $xtWriter))->run();
 
     $monitor->finish($runId, 'success', [

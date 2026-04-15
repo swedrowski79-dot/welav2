@@ -67,6 +67,18 @@ final class WelaApiClient
         return (int) ($data['deleted'] ?? 0);
     }
 
+    public function syncProduct(array $payload): array
+    {
+        $response = $this->request('sync_product', $payload);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Produkt-Sync-Ergebnis.');
+        }
+
+        return $data;
+    }
+
     private function request(string $action, array $body): array
     {
         if (!$this->isConfigured()) {

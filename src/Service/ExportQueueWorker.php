@@ -25,7 +25,7 @@ final class ExportQueueWorker
         private array $deltaConfig,
         private ?SyncMonitor $monitor = null,
         private ?int $runId = null,
-        private ?XtMediaDocumentWriter $xtWriter = null
+        private ?XtQueueWriter $xtWriter = null
     ) {
         $configKeys = $this->deltaConfig['export_queue_entities'] ?? ['product_export_queue'];
         $this->configKeys = array_values(array_filter(

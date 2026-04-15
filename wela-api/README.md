@@ -29,6 +29,7 @@ X-Wela-Signature: <hmac-sha256 ueber "<timestamp>.<body>">
 - `lookup_map`
 - `upsert_row`
 - `delete_rows`
+- `sync_product`
 
 Antwortbeispiel:
 
