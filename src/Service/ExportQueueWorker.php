@@ -24,7 +24,8 @@ final class ExportQueueWorker
         private PDO $stageDb,
         private array $deltaConfig,
         private ?SyncMonitor $monitor = null,
-        private ?int $runId = null
+        private ?int $runId = null,
+        private ?XtMediaDocumentWriter $xtWriter = null
     ) {
         $configKeys = $this->deltaConfig['export_queue_entities'] ?? ['product_export_queue'];
         $this->configKeys = array_values(array_filter(
@@ -241,7 +242,8 @@ final class ExportQueueWorker
         $queueId = (int) ($entry['id'] ?? 0);
         $entityId = trim((string) ($entry['entity_id'] ?? ''));
         $claimToken = (string) ($entry['claim_token'] ?? '');
-        $confirmedHash = $this->confirmedHash($entry);
+        $payload = $this->decodePayload($entry);
+        $confirmedHash = $this->confirmedHash($entry, $payload);
 
         if ($entityId === '') {
             throw new PermanentExportQueueException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
@@ -251,9 +253,12 @@ final class ExportQueueWorker
             throw new RuntimeException('Queue-Eintrag wurde nicht korrekt geclaimt.');
         }
 
-        $this->stageDb->beginTransaction();
-
         try {
+            if ($this->xtWriter !== null && $this->xtWriter->supports($this->entityType)) {
+                $this->xtWriter->write($this->entityType, $entry, $payload);
+            }
+
+            $this->stageDb->beginTransaction();
             $this->updateConfirmedState($entityId, $confirmedHash);
             $this->markDone($queueId, $claimToken);
             $this->stageDb->commit();
@@ -275,10 +280,19 @@ final class ExportQueueWorker
         }
     }
 
-    private function confirmedHash(array $entry): string
+    private function decodePayload(array $entry): array
     {
         $payload = json_decode((string) ($entry['payload'] ?? ''), true);
 
+        if (!is_array($payload)) {
+            throw new PermanentExportQueueException('Queue-Payload ist kein gueltiges JSON.');
+        }
+
+        return $payload;
+    }
+
+    private function confirmedHash(array $entry, array $payload): string
+    {
         if (!is_array($payload)) {
             throw new PermanentExportQueueException('Queue-Payload ist kein gueltiges JSON.');
         }

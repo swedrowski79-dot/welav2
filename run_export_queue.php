@@ -3,9 +3,12 @@
 require __DIR__ . '/src/Database/ConnectionFactory.php';
 require __DIR__ . '/src/Monitoring/SyncMonitor.php';
 require __DIR__ . '/src/Service/ExportQueueWorker.php';
+require __DIR__ . '/src/Service/WelaApiClient.php';
+require __DIR__ . '/src/Service/XtMediaDocumentWriter.php';
 
 $configSources = require __DIR__ . '/config/sources.php';
 $configDelta = require __DIR__ . '/config/delta.php';
+$configXtWrite = require __DIR__ . '/config/xt_write.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
 $monitor = new SyncMonitor($stageDb);
@@ -15,7 +18,8 @@ $runId = $monitor->start('export_queue_worker', [
 
 try {
     $monitor->log($runId, 'info', 'Export Queue Worker gestartet.');
-    $stats = (new ExportQueueWorker($stageDb, $configDelta, $monitor, $runId))->run();
+    $xtWriter = new XtMediaDocumentWriter($configSources, $configXtWrite);
+    $stats = (new ExportQueueWorker($stageDb, $configDelta, $monitor, $runId, $xtWriter))->run();
 
     $monitor->finish($runId, 'success', [
         'merged_records' => (int) ($stats['done'] ?? 0),

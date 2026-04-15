@@ -26,6 +26,9 @@ X-Wela-Signature: <hmac-sha256 ueber "<timestamp>.<body>">
 ## Aktuell implementierte Aktionen
 
 - `health`
+- `lookup_map`
+- `upsert_row`
+- `delete_rows`
 
 Antwortbeispiel:
 

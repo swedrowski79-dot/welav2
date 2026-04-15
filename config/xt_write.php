@@ -248,6 +248,8 @@ return [
             'table' => 'xt_media_link',
             'base' => 'stage_product_media',
             'replace_by' => ['link_id', 'type'],
+            'identity_columns' => ['m_id', 'link_id', 'type'],
+            'delete_match_columns' => ['m_id', 'type'],
             'filter' => [
                 'type' => 'images',
             ],
@@ -293,6 +295,8 @@ return [
             'table' => 'xt_media_link',
             'base' => 'stage_product_documents',
             'replace_by' => ['link_id', 'type'],
+            'identity_columns' => ['m_id', 'link_id', 'type'],
+            'delete_match_columns' => ['m_id', 'type'],
             'columns' => [
                 'm_id' => 'ref:xt_media.id by external_id=stage.afs_document_id',
                 'link_id' => 'ref:xt_products.products_id by external_id=stage.afs_artikel_id',
