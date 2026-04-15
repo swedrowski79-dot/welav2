@@ -32,6 +32,8 @@ RUN docker-php-ext-install \
 RUN pecl install sqlsrv-5.12.0 pdo_sqlsrv-5.12.0 \
     && docker-php-ext-enable sqlsrv pdo_sqlsrv
 
+COPY docker/php/conf.d/zz-memory-limit.ini /usr/local/etc/php/conf.d/zz-memory-limit.ini
+
 ENV PATH="${PATH}:/opt/mssql-tools18/bin"
 
 WORKDIR /app
