@@ -66,41 +66,17 @@
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end">
         <div>
             <h2 class="h5 mb-1">Sync starten</h2>
-            <div class="text-secondary small">Import, Merge, Expand inklusive Delta, Export Worker und die komplette Pipeline koennen direkt aus der Oberflaeche gestartet werden.</div>
+            <div class="text-secondary small">Import, Merge, Expand inklusive Delta, XT Mirror Refresh, Export Worker und die komplette Pipeline koennen direkt aus der Oberflaeche gestartet werden.</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="import_all">
-                <button class="btn btn-primary" type="submit">Import starten</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="import_products">
-                <button class="btn btn-outline-primary" type="submit">Produkt-Import</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="import_categories">
-                <button class="btn btn-outline-primary" type="submit">Kategorie-Import</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="merge">
-                <button class="btn btn-outline-primary" type="submit">Merge starten</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="expand">
-                <button class="btn btn-outline-secondary" type="submit">Expand starten</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="delta">
-                <button class="btn btn-outline-dark" type="submit">Delta starten</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="export_queue_worker">
-                <button class="btn btn-outline-dark" type="submit">Export Worker</button>
-            </form>
-            <form method="post" action="/sync-runs/start">
-                <input type="hidden" name="job" value="full_pipeline">
-                <button class="btn btn-dark" type="submit">Full Pipeline</button>
-            </form>
+            <?php foreach ($launchSections as $section): ?>
+                <?php foreach ($section['jobs'] as $job): ?>
+                    <form method="post" action="/sync-runs/start">
+                        <input type="hidden" name="job" value="<?= Html::escape($job['name']) ?>">
+                        <button class="btn <?= Html::escape($job['button_class']) ?>" type="submit"><?= Html::escape($job['label']) ?></button>
+                    </form>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
         </div>
     </div>
 </div>
@@ -143,7 +119,7 @@
             <?php foreach ($runs as $run): ?>
                 <tr>
                     <td>#<?= Html::escape($run['id']) ?></td>
-                    <td><?= Html::escape($run['run_type']) ?></td>
+                    <td><?= Html::escape(\PipelineConfig::labelForRunType((string) ($run['run_type'] ?? ''))) ?></td>
                     <td><span class="badge <?= Html::badgeClass($run['status']) ?>"><?= Html::escape($run['status']) ?></span></td>
                     <td><?= Html::escape($run['imported_records'] ?? 0) ?></td>
                     <td><?= Html::escape($run['merged_records'] ?? 0) ?></td>

@@ -10,6 +10,7 @@ return [
     'product_export_queue' => [
         'label' => 'Produkt',
         'entity_type' => 'product',
+        'queue_table' => 'export_queue',
         'queue_insert_batch_size' => 200,
         'worker_batch_size' => 100,
         'worker_max_attempts' => 3,
@@ -28,9 +29,7 @@ return [
             'online' => 0,
         ],
         'monitor_source' => 'delta_products',
-        'snapshot_table' => 'xt_products_snapshot',
-        'snapshot_identity_field' => 'afs_artikel_id',
-        'snapshot_compare_fields' => [
+        'mirror_compare_fields' => [
             'product.sku' => 'sku',
             'product.ean' => 'ean',
             'product.stock' => 'stock',
@@ -41,9 +40,10 @@ return [
             'product.master_sku' => 'master_sku',
             'product.category_afs_id' => 'category_afs_id',
         ],
-        'snapshot_translation_hash_field' => 'translation_hash',
-        'snapshot_attribute_hash_field' => 'attribute_hash',
-        'snapshot_seo_hash_field' => 'seo_hash',
+        'mirror_translation_hash_field' => 'translation_hash',
+        'mirror_attribute_hash_field' => 'attribute_hash',
+        'mirror_seo_hash_field' => 'seo_hash',
+        'mirror_require_success_run' => true,
         'hash_fields' => [
             'afs_artikel_id',
             'sku',
@@ -72,6 +72,7 @@ return [
     'media_export_queue' => [
         'label' => 'Medien',
         'entity_type' => 'media',
+        'queue_table' => 'export_queue',
         'queue_insert_batch_size' => 200,
         'worker_batch_size' => 100,
         'worker_max_attempts' => 3,
@@ -88,9 +89,8 @@ return [
             'deleted' => 1,
         ],
         'monitor_source' => 'delta_media',
-        'snapshot_table' => 'xt_media_snapshot',
-        'snapshot_identity_field' => 'media_external_id',
-        'snapshot_compare_fields' => [
+        'mirror_require_success_run' => true,
+        'mirror_compare_fields' => [
             'media_external_id' => 'media_external_id',
             'afs_artikel_id' => 'afs_artikel_id',
             'file_name' => 'file_name',
@@ -113,6 +113,7 @@ return [
     'document_export_queue' => [
         'label' => 'Dokument',
         'entity_type' => 'document',
+        'queue_table' => 'export_queue',
         'queue_insert_batch_size' => 200,
         'worker_batch_size' => 100,
         'worker_max_attempts' => 3,
@@ -129,9 +130,8 @@ return [
             'deleted' => 1,
         ],
         'monitor_source' => 'delta_documents',
-        'snapshot_table' => 'xt_documents_snapshot',
-        'snapshot_identity_field' => 'afs_document_id',
-        'snapshot_compare_fields' => [
+        'mirror_require_success_run' => true,
+        'mirror_compare_fields' => [
             'afs_document_id' => 'afs_document_id',
             'afs_artikel_id' => 'afs_artikel_id',
             'file_name' => 'file_name',
@@ -148,139 +148,6 @@ return [
             'document_type',
             'sort_order',
             'position',
-        ],
-    ],
-
-    'delta' => [
-        'products' => [
-            'stage_table' => 'stage_products',
-            'xt_table' => 'xt_products',
-            'identity' => [
-                'stage_field' => 'afs_artikel_id',
-                'xt_lookup_field' => 'external_id',
-                'xt_id_field' => 'products_id',
-            ],
-            'compare' => [
-                'products_model'        => 'sku',
-                'products_ean'          => 'ean',
-                'products_quantity'     => 'stock',
-                'products_price'        => 'price',
-                'products_weight'       => 'weight',
-                'products_status'       => 'online_flag',
-                'products_master_flag'  => 'is_master',
-                'products_master_model' => 'master_sku',
-            ],
-        ],
-
-        'categories' => [
-            'stage_table' => 'stage_categories',
-            'xt_table' => 'xt_categories',
-            'identity' => [
-                'stage_field' => 'afs_wg_id',
-                'xt_lookup_field' => 'external_id',
-                'xt_id_field' => 'categories_id',
-            ],
-            'compare' => [
-                'categories_image'        => 'image',
-                'categories_master_image' => 'header_image',
-                'categories_status'       => 'online_flag',
-            ],
-        ],
-
-        'products_description' => [
-            'type' => 'multilang_child',
-            'stage_table' => 'stage_products',
-            'xt_table' => 'xt_products_description',
-            'languages' => ['de', 'en', 'fr', 'nl'],
-            'identity' => [
-                'stage_field' => 'afs_artikel_id',
-                'xt_entity_lookup' => 'xt_products.external_id',
-                'xt_entity_id_field' => 'xt_products.products_id',
-            ],
-            'compare_by_language' => [
-                'de' => [
-                    'products_name' => 'name_de',
-                    'products_description' => 'description_de',
-                    'products_short_description' => 'short_description_de',
-                ],
-                'en' => [
-                    'products_name' => 'name_de',
-                    'products_description' => 'description_en',
-                    'products_short_description' => 'short_description_en',
-                ],
-                'fr' => [
-                    'products_name' => 'name_de',
-                    'products_description' => 'description_fr',
-                    'products_short_description' => 'short_description_fr',
-                ],
-                'nl' => [
-                    'products_name' => 'name_de',
-                    'products_description' => 'description_nl',
-                    'products_short_description' => 'short_description_nl',
-                ],
-            ],
-        ],
-
-        'seo_products' => [
-            'type' => 'seo',
-            'stage_table' => 'stage_products',
-            'xt_table' => 'xt_seo_url',
-            'languages' => ['de', 'en', 'fr', 'nl'],
-            'identity' => [
-                'link_type' => 1,
-                'link_id' => 'ref:xt_products.products_id by external_id=stage.afs_artikel_id',
-                'store_id' => 1,
-            ],
-            'compare_by_language' => [
-                'de' => [
-                    'meta_title' => 'meta_title_de',
-                    'meta_description' => 'meta_description_de',
-                ],
-                'en' => [
-                    'meta_title' => 'meta_title_en',
-                    'meta_description' => 'meta_description_en',
-                ],
-                'fr' => [
-                    'meta_title' => 'meta_title_fr',
-                    'meta_description' => 'meta_description_fr',
-                ],
-                'nl' => [
-                    'meta_title' => 'meta_title_nl',
-                    'meta_description' => 'meta_description_nl',
-                ],
-            ],
-            'preserve_existing_url' => true,
-        ],
-
-        'seo_categories' => [
-            'type' => 'seo',
-            'stage_table' => 'stage_categories',
-            'xt_table' => 'xt_seo_url',
-            'languages' => ['de', 'en', 'fr', 'nl'],
-            'identity' => [
-                'link_type' => 2,
-                'link_id' => 'ref:xt_categories.categories_id by external_id=stage.afs_wg_id',
-                'store_id' => 1,
-            ],
-            'compare_by_language' => [
-                'de' => [
-                    'meta_title' => 'meta_title_de',
-                    'meta_description' => 'meta_description_de',
-                ],
-                'en' => [
-                    'meta_title' => 'meta_title_en',
-                    'meta_description' => 'meta_description_en',
-                ],
-                'fr' => [
-                    'meta_title' => 'meta_title_fr',
-                    'meta_description' => 'meta_description_fr',
-                ],
-                'nl' => [
-                    'meta_title' => 'meta_title_nl',
-                    'meta_description' => 'meta_description_nl',
-                ],
-            ],
-            'preserve_existing_url' => true,
         ],
     ],
 ];

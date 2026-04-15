@@ -8,30 +8,25 @@ final class StatusRepository
 {
     private const MYSQL_TABLE_NOT_FOUND = 1146;
 
-    public function __construct(private \PDO $stageDb)
+    public function __construct(private \PDO $stageDb, private array $adminConfig)
     {
     }
 
     public function tableCounts(): array
     {
-        $tables = [
-            'raw_afs_articles',
-            'raw_afs_categories',
-            'raw_extra_article_translations',
-            'raw_extra_category_translations',
-            'stage_products',
-            'stage_product_translations',
-            'stage_categories',
-            'stage_category_translations',
-            'stage_attribute_translations',
-            'sync_runs',
-            'sync_logs',
-            'sync_errors',
-        ];
+        $tables = $this->adminConfig['stage_tables'] ?? [];
 
         $counts = [];
-        foreach ($tables as $table) {
-            $counts[$table] = $this->countTable($table);
+        foreach ($tables as $table => $label) {
+            if (!is_string($table) || $table === '') {
+                continue;
+            }
+
+            $counts[] = [
+                'table' => $table,
+                'label' => is_string($label) && $label !== '' ? $label : $table,
+                'count' => $this->countTable($table),
+            ];
         }
 
         return $counts;

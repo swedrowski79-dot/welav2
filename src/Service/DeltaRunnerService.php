@@ -10,14 +10,14 @@ class DeltaRunnerService
         private ?SyncMonitor $monitor = null,
         private ?int $runId = null
     ) {
-        $configKeys = $this->deltaConfig['export_queue_entities'] ?? ['product_export_queue'];
+        $configKeys = $this->deltaConfig['export_queue_entities'] ?? null;
         $this->configKeys = array_values(array_filter(
             is_array($configKeys) ? $configKeys : [],
             static fn (mixed $key): bool => is_string($key) && $key !== ''
         ));
 
         if ($this->configKeys === []) {
-            $this->configKeys = ['product_export_queue'];
+            throw new RuntimeException('Delta-Konfiguration enthaelt keine export_queue_entities.');
         }
     }
 

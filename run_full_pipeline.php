@@ -2,17 +2,16 @@
 
 require __DIR__ . '/src/Database/ConnectionFactory.php';
 require __DIR__ . '/src/Monitoring/SyncMonitor.php';
+require __DIR__ . '/src/Service/PipelineConfig.php';
 
 $configSources = require __DIR__ . '/config/sources.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
 $monitor = new SyncMonitor($stageDb);
-$steps = [
-    'import_all' => __DIR__ . '/run_import_all.php',
-    'merge' => __DIR__ . '/run_merge.php',
-    'expand' => __DIR__ . '/run_expand.php',
-    'export_queue_worker' => __DIR__ . '/run_export_queue.php',
-];
+$steps = [];
+foreach (PipelineConfig::fullPipelineSteps() as $stepName) {
+    $steps[$stepName] = __DIR__ . '/' . PipelineConfig::script($stepName);
+}
 
 $runId = $monitor->start('full_pipeline', [
     'script' => 'run_full_pipeline.php',

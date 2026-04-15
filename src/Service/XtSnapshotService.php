@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/XtWriteDependencyMap.php';
-
 final class XtSnapshotService
 {
     private array $mirrorDefinitions;
@@ -18,22 +16,26 @@ final class XtSnapshotService
         private ?SyncMonitor $monitor = null,
         private ?int $runId = null
     ) {
-        $snapshotConfig = $config['snapshot'] ?? [];
-        $this->pageSize = max(1, (int) ($snapshotConfig['page_size'] ?? 500));
-        $this->writeBatchSize = max(1, (int) ($snapshotConfig['write_batch_size'] ?? 500));
+        $refreshConfig = $config['refresh'] ?? $config['snapshot'] ?? [];
+        $mirrorConfig = $config['mirror'] ?? [];
+        $this->pageSize = max(1, (int) ($refreshConfig['page_size'] ?? 500));
+        $this->writeBatchSize = max(1, (int) ($refreshConfig['write_batch_size'] ?? 500));
         $this->stageWriter = new StageWriter($this->stageDb);
-        $xtWriteConfig = require dirname(__DIR__, 2) . '/config/xt_write.php';
-        $this->mirrorDefinitions = XtWriteDependencyMap::tableDefinitions($xtWriteConfig);
+        $this->mirrorDefinitions = is_array($mirrorConfig) ? $mirrorConfig : [];
+
+        if ($this->mirrorDefinitions === []) {
+            throw new RuntimeException('XT-Mirror-Konfiguration enthaelt keine Mirror-Definitionen.');
+        }
     }
 
     public function run(): array
     {
         if (!$this->xtApiClient->isConfigured()) {
-            throw new RuntimeException('XT-API ist fuer den Snapshot-Import nicht konfiguriert.');
+            throw new RuntimeException('XT-API ist fuer den XT-Mirror-Refresh nicht konfiguriert.');
         }
 
         $this->xtApiClient->health();
-        $this->log('info', 'XT-API fuer Snapshot-Import erreichbar.');
+        $this->log('info', 'XT-API fuer XT-Mirror-Refresh erreichbar.');
 
         $importedAt = date('Y-m-d H:i:s');
         $mirrorSources = $this->fetchMirrorSources();
@@ -78,15 +80,10 @@ final class XtSnapshotService
 
         try {
             $this->clearMirrorTables();
-            $this->clearSnapshotTables();
 
             foreach ($mirrorRows as $table => $rows) {
                 $this->insertBatches($table, $rows);
             }
-            $this->insertBatches('xt_products_snapshot', $productSnapshots);
-            $this->insertBatches('xt_categories_snapshot', $categorySnapshots);
-            $this->insertBatches('xt_media_snapshot', $mediaSnapshots);
-            $this->insertBatches('xt_documents_snapshot', $documentSnapshots);
 
             $this->stageDb->commit();
         } catch (Throwable $exception) {
@@ -115,7 +112,7 @@ final class XtSnapshotService
             ],
         ];
 
-        $this->log('info', 'XT-Snapshot-Tabellen aktualisiert.', $stats);
+        $this->log('info', 'XT-Mirror-Tabellen aktualisiert.', $stats);
 
         return $stats;
     }
@@ -132,29 +129,15 @@ final class XtSnapshotService
         }
     }
 
-    private function clearSnapshotTables(): void
-    {
-        foreach ([
-            'xt_products_snapshot',
-            'xt_categories_snapshot',
-            'xt_media_snapshot',
-            'xt_documents_snapshot',
-        ] as $table) {
-            $this->stageDb->exec("DELETE FROM `{$table}`");
-        }
-    }
-
     private function fetchMirrorSources(): array
     {
         $sources = [];
 
         foreach ($this->mirrorDefinitions as $table => $definition) {
+            $sourceTable = (string) ($definition['table'] ?? $table);
             $sources[$table] = $this->fetchTable(
-                $table,
-                array_values(array_unique(array_merge(
-                    is_array($definition['fields'] ?? null) ? $definition['fields'] : [],
-                    $this->supplementalReadFields($table)
-                )))
+                $sourceTable,
+                is_array($definition['fields'] ?? null) ? $definition['fields'] : []
             );
         }
 
@@ -164,7 +147,7 @@ final class XtSnapshotService
     private function fetchTable(string $table, array $fields): array
     {
         if ($table === '' || $fields === []) {
-            throw new RuntimeException("XT-Snapshot-Quelle fuer Tabelle '{$table}' ist unvollstaendig.");
+            throw new RuntimeException("XT-Mirror-Quelle fuer Tabelle '{$table}' ist unvollstaendig.");
         }
 
         $fields = array_values(array_unique(array_filter($fields, static fn (mixed $field): bool => is_string($field) && $field !== '')));
@@ -191,7 +174,7 @@ final class XtSnapshotService
             $offset = $nextOffset;
         } while (true);
 
-        $this->log('info', 'XT-Snapshot-Quelle geladen.', [
+        $this->log('info', 'XT-Mirror-Quelle geladen.', [
             'table' => $table,
             'fields' => $fields,
             'rows' => count($rows),
@@ -249,15 +232,6 @@ final class XtSnapshotService
         ksort($counts);
 
         return $counts;
-    }
-
-    private function supplementalReadFields(string $table): array
-    {
-        return match ($table) {
-            'xt_products' => ['products_image'],
-            'xt_media_link' => ['ml_id'],
-            default => [],
-        };
     }
 
     private function buildProductSnapshots(

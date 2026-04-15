@@ -84,50 +84,10 @@
                     <div class="text-secondary small">Die Aktionen sind entlang des aktuellen Pipeline-Flusses gruppiert: Import, Merge, Expand inklusive Delta und anschliessender Export-Worker.</div>
                 </div>
                 <div class="d-flex gap-2">
-                    <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Produkt Export State</a>
+                    <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Export States</a>
                 </div>
             </div>
-            <?php foreach ([
-                [
-                    'title' => '1. Import (AFS → RAW)',
-                    'description' => 'Quellen nach RAW laden. Fuer schnelle Tests koennen einzelne Importbereiche separat gestartet werden.',
-                    'jobs' => [
-                        ['job' => 'import_all', 'label' => 'Run Import', 'class' => 'btn-primary', 'help' => 'Laedt alle aktuellen Importquellen in die RAW-Tabellen.'],
-                        ['job' => 'import_products', 'label' => 'Run Product Import', 'class' => 'btn-outline-primary', 'help' => 'Importiert nur Produktdaten und Artikel-Uebersetzungen.'],
-                        ['job' => 'import_categories', 'label' => 'Run Category Import', 'class' => 'btn-outline-primary', 'help' => 'Importiert nur Kategorien und Kategorie-Uebersetzungen.'],
-                    ],
-                ],
-                [
-                    'title' => '2. Processing (Merge / Expand)',
-                    'description' => 'RAW-Daten zu Stage-Daten verdichten. Expand erzeugt die erweiterten Stage-Daten und fuehrt danach direkt den Delta-Lauf aus.',
-                    'jobs' => [
-                        ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary', 'help' => 'Fuehrt RAW-Quellen zu den Stage-Grunddaten zusammen.'],
-                        ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary', 'help' => 'Erzeugt expandierte Stage-Daten und startet im selben Lauf die Delta-Berechnung.'],
-                    ],
-                ],
-                [
-                    'title' => '3. XT Snapshot (optional)',
-                    'description' => 'Optionaler Zielsystem-Snapshot, um den aktuellen XT-Stand fuer spaetere target-aware Delta-Vergleiche verfuegbar zu machen. Der Snapshot laeuft unabhaengig von Queue und Export Worker.',
-                    'jobs' => [
-                        ['job' => 'xt_snapshot', 'label' => 'Run XT Snapshot', 'class' => 'btn-outline-info', 'help' => 'Liest Produkte, Kategorien, Medien und Dokumente aus XT ueber die API und aktualisiert die lokalen Snapshot-Tabellen.'],
-                    ],
-                ],
-                [
-                    'title' => '4. Delta / Export',
-                    'description' => 'Delta kann bei Bedarf separat erneut ausgefuehrt werden. Der Export Worker verarbeitet danach die Queue bis zum aktuell implementierten XT-Sync-Endpunkt.',
-                    'jobs' => [
-                        ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark', 'help' => 'Optionaler manueller Delta-Neulauf fuer erneute Queue-Befuellung ohne neuen Expand-Lauf.'],
-                        ['job' => 'export_queue_worker', 'label' => 'Run Export Worker', 'class' => 'btn-outline-dark', 'help' => 'Verarbeitet Queue-Eintraege, schreibt in XT und bestaetigt danach den Export-Status.'],
-                    ],
-                ],
-                [
-                    'title' => '5. Full Pipeline',
-                    'description' => 'Gesamtlauf fuer einen kompletten Durchgang von Import bis Export Worker. XT Snapshot bleibt bewusst ein optionaler separater Diagnoseschritt.',
-                    'jobs' => [
-                        ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark', 'help' => 'Startet Import, Merge, Expand inklusive Delta und anschliessend den Export Worker.'],
-                    ],
-                ],
-            ] as $section): ?>
+            <?php foreach ($pipelineSections as $section): ?>
                 <div class="border rounded-4 p-3 p-lg-4 mb-3 bg-light-subtle">
                     <div class="fw-semibold mb-1"><?= Html::escape($section['title']) ?></div>
                     <div class="small text-secondary mb-3"><?= Html::escape($section['description']) ?></div>
@@ -136,8 +96,8 @@
                             <div class="col-12 col-md-6">
                                 <div class="border rounded-4 p-3 h-100 bg-white">
                                     <form method="post" action="/pipeline/start" class="mb-2">
-                                        <input type="hidden" name="job" value="<?= Html::escape($job['job']) ?>">
-                                        <button class="btn <?= Html::escape($job['class']) ?> w-100" type="submit"><?= Html::escape($job['label']) ?></button>
+                                        <input type="hidden" name="job" value="<?= Html::escape($job['name']) ?>">
+                                        <button class="btn <?= Html::escape($job['button_class']) ?> w-100" type="submit"><?= Html::escape($job['label']) ?></button>
                                     </form>
                                     <div class="small text-secondary"><?= Html::escape($job['help']) ?></div>
                                 </div>
@@ -161,6 +121,17 @@
             <div class="metric-icon mb-3"><i class="bi bi-fingerprint"></i></div>
             <div class="display-6 fw-semibold"><?= Html::escape($stateSummary['entries']) ?></div>
             <div class="text-secondary">State-Eintraege</div>
+            <?php if (!empty($stateSummary['entities']) && is_array($stateSummary['entities'])): ?>
+                <div class="small text-secondary mt-2">
+                    <?php
+                    $parts = [];
+                    foreach ($stateSummary['entities'] as $entityType => $count) {
+                        $parts[] = $entityType . ': ' . $count;
+                    }
+                    echo Html::escape(implode(' · ', $parts));
+                    ?>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>

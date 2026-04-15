@@ -89,6 +89,22 @@ final class StageConsistencyRepository
                 'count_sql' => 'SELECT COUNT(*) FROM product_export_state s LEFT JOIN stage_products p ON p.afs_artikel_id = s.product_id WHERE p.afs_artikel_id IS NULL',
                 'example_sql' => 'SELECT s.product_id FROM product_export_state s LEFT JOIN stage_products p ON p.afs_artikel_id = s.product_id WHERE p.afs_artikel_id IS NULL ORDER BY s.product_id ASC LIMIT 5',
             ],
+            [
+                'name' => 'Media-Export-State ohne aktuelles Medium',
+                'severity' => 'warning',
+                'description' => 'Persistenter Media-Export-State verweist auf Medien, die aktuell nicht mehr in `stage_product_media` vorhanden sind.',
+                'tables' => ['product_media_export_state', 'stage_product_media'],
+                'count_sql' => 'SELECT COUNT(*) FROM product_media_export_state s LEFT JOIN stage_product_media m ON BINARY m.media_external_id = BINARY s.entity_id WHERE m.media_external_id IS NULL',
+                'example_sql' => 'SELECT s.entity_id FROM product_media_export_state s LEFT JOIN stage_product_media m ON BINARY m.media_external_id = BINARY s.entity_id WHERE m.media_external_id IS NULL ORDER BY s.entity_id ASC LIMIT 5',
+            ],
+            [
+                'name' => 'Dokument-Export-State ohne aktuelles Dokument',
+                'severity' => 'warning',
+                'description' => 'Persistenter Dokument-Export-State verweist auf Dokumente, die aktuell nicht mehr in `stage_product_documents` vorhanden sind.',
+                'tables' => ['product_document_export_state', 'stage_product_documents'],
+                'count_sql' => 'SELECT COUNT(*) FROM product_document_export_state s LEFT JOIN stage_product_documents d ON BINARY CAST(d.afs_document_id AS CHAR) = BINARY s.entity_id WHERE d.afs_document_id IS NULL',
+                'example_sql' => 'SELECT s.entity_id FROM product_document_export_state s LEFT JOIN stage_product_documents d ON BINARY CAST(d.afs_document_id AS CHAR) = BINARY s.entity_id WHERE d.afs_document_id IS NULL ORDER BY s.entity_id ASC LIMIT 5',
+            ],
         ];
     }
 

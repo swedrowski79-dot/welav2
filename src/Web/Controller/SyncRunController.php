@@ -32,6 +32,7 @@ final class SyncRunController extends Controller
             'pageSubtitle' => 'Laufhistorie mit Status, Mengen und Dauer.',
             'summary' => $repository->runSummary(),
             'runs' => $repository->paginatedRuns($filters, $paginator),
+            'launchSections' => \PipelineConfig::sections('sync_runs'),
             'filters' => $filters,
             'paginator' => $paginator,
             'started' => $request->query('started') === '1',

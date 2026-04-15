@@ -7,7 +7,8 @@ require __DIR__ . '/src/Service/WelaApiClient.php';
 require __DIR__ . '/src/Service/XtSnapshotService.php';
 
 $configSources = require __DIR__ . '/config/sources.php';
-$configXtSnapshot = require __DIR__ . '/config/xt_snapshot.php';
+$configXtRefresh = require __DIR__ . '/config/xt_snapshot.php';
+$configXtMirror = require __DIR__ . '/config/xt_mirror.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
 $xtConnection = $configSources['sources']['xt']['connection'] ?? [];
@@ -18,7 +19,7 @@ $runId = $monitor->start('xt_snapshot', [
 ]);
 
 try {
-    $monitor->log($runId, 'info', 'XT-Snapshot-Import gestartet.');
+    $monitor->log($runId, 'info', 'XT-Mirror-Refresh gestartet.');
 
     $stats = (new XtSnapshotService(
         $stageDb,
@@ -26,7 +27,10 @@ try {
             (string) ($xtConnection['url'] ?? ''),
             (string) ($xtConnection['key'] ?? '')
         ),
-        $configXtSnapshot,
+        [
+            'refresh' => $configXtRefresh['refresh'] ?? [],
+            'mirror' => $configXtMirror['mirror'] ?? [],
+        ],
         $monitor,
         $runId
     ))->run();
@@ -36,11 +40,11 @@ try {
     $monitor->finish($runId, 'success', [
         'imported_records' => $importedRecords,
         'context' => $stats,
-    ], 'XT-Snapshot-Import abgeschlossen.');
+    ], 'XT-Mirror-Refresh abgeschlossen.');
 
-    echo "XT-Snapshot-Import abgeschlossen.\n";
+    echo "XT-Mirror-Refresh abgeschlossen.\n";
 } catch (Throwable $exception) {
-    $monitor->log($runId, 'error', 'XT-Snapshot-Import fehlgeschlagen.', [
+    $monitor->log($runId, 'error', 'XT-Mirror-Refresh fehlgeschlagen.', [
         'exception' => $exception->getMessage(),
     ]);
     $monitor->error($runId, $exception->getMessage(), [
@@ -49,7 +53,7 @@ try {
     ]);
     $monitor->finish($runId, 'failed', [
         'error_count' => 1,
-    ], 'XT-Snapshot-Import fehlgeschlagen.');
+    ], 'XT-Mirror-Refresh fehlgeschlagen.');
 
     throw $exception;
 }

@@ -11,7 +11,11 @@ final class PipelineAdminRepository
     private const MYSQL_TABLE_NOT_FOUND = 1146;
     private ?array $exportQueueColumns = null;
 
-    public function __construct(private \PDO $stageDb, private array $adminConfig)
+    public function __construct(
+        private \PDO $stageDb,
+        private array $adminConfig,
+        private array $deltaConfig = []
+    )
     {
     }
 
@@ -200,28 +204,36 @@ final class PipelineAdminRepository
 
     public function stateSummary(): array
     {
-        return [
-            'entries' => $this->countWhere('product_export_state'),
+        $summary = [
+            'entries' => 0,
             'stage_tables' => count($this->stageTables()),
+            'entities' => [],
         ];
+
+        foreach ($this->stateDefinitions() as $definition) {
+            $count = $this->countWhere($definition['table']);
+            $summary['entries'] += $count;
+            $summary['entities'][$definition['entity_type']] = $count;
+        }
+
+        return $summary;
     }
 
-    public function paginatedStateEntries(string $search, Paginator $paginator): array
+    public function paginatedStateEntries(array $filters, Paginator $paginator): array
     {
         try {
-            $whereSql = '';
-            $params = [];
+            [$whereSql, $params] = $this->buildStateFilters($filters);
+            $stateSql = $this->stateSelectSql();
 
-            if ($search !== '') {
-                $whereSql = 'WHERE CAST(product_id AS CHAR) LIKE :search OR COALESCE(last_exported_hash, "") LIKE :search';
-                $params[':search'] = '%' . $search . '%';
+            if ($stateSql === null) {
+                return [];
             }
 
             $stmt = $this->stageDb->prepare(
-                "SELECT product_id, last_exported_hash, last_seen_at
-                 FROM product_export_state
+                "SELECT entity_type, entity_label, state_table, entity_id, last_exported_hash, last_seen_at
+                 FROM ({$stateSql}) state_rows
                  {$whereSql}
-                 ORDER BY last_seen_at DESC, product_id DESC
+                 ORDER BY last_seen_at DESC, entity_type ASC, entity_id DESC
                  LIMIT :limit OFFSET :offset"
             );
 
@@ -246,15 +258,37 @@ final class PipelineAdminRepository
     public function countStateEntries(string $search): int
     {
         try {
-            $whereSql = '';
-            $params = [];
+            [$whereSql, $params] = $this->buildStateFilters(['q' => $search, 'entity_type' => '']);
+            $stateSql = $this->stateSelectSql();
 
-            if ($search !== '') {
-                $whereSql = 'WHERE CAST(product_id AS CHAR) LIKE :search OR COALESCE(last_exported_hash, "") LIKE :search';
-                $params[':search'] = '%' . $search . '%';
+            if ($stateSql === null) {
+                return 0;
             }
 
-            $stmt = $this->stageDb->prepare("SELECT COUNT(*) FROM product_export_state {$whereSql}");
+            $stmt = $this->stageDb->prepare("SELECT COUNT(*) FROM ({$stateSql}) state_rows {$whereSql}");
+            $stmt->execute($params);
+
+            return (int) $stmt->fetchColumn();
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return 0;
+            }
+
+            throw $exception;
+        }
+    }
+
+    public function countStateEntriesWithFilters(array $filters): int
+    {
+        try {
+            [$whereSql, $params] = $this->buildStateFilters($filters);
+            $stateSql = $this->stateSelectSql();
+
+            if ($stateSql === null) {
+                return 0;
+            }
+
+            $stmt = $this->stageDb->prepare("SELECT COUNT(*) FROM ({$stateSql}) state_rows {$whereSql}");
             $stmt->execute($params);
 
             return (int) $stmt->fetchColumn();
@@ -383,6 +417,26 @@ final class PipelineAdminRepository
         return [$where === [] ? '' : 'WHERE ' . implode(' AND ', $where), $params];
     }
 
+    private function buildStateFilters(array $filters): array
+    {
+        $where = [];
+        $params = [];
+
+        $search = (string) ($filters['q'] ?? '');
+        if ($search !== '') {
+            $where[] = '(CAST(entity_id AS CHAR) LIKE :search OR COALESCE(last_exported_hash, "") LIKE :search)';
+            $params[':search'] = '%' . $search . '%';
+        }
+
+        $entityType = (string) ($filters['entity_type'] ?? '');
+        if ($entityType !== '') {
+            $where[] = 'entity_type = :entity_type';
+            $params[':entity_type'] = $entityType;
+        }
+
+        return [$where === [] ? '' : 'WHERE ' . implode(' AND ', $where), $params];
+    }
+
     private function logAdminAction(string $message, array $context, string $level): void
     {
         try {
@@ -424,6 +478,75 @@ final class PipelineAdminRepository
             array_keys($tables),
             static fn (string $table): bool => str_starts_with($table, 'stage_')
         ));
+    }
+
+    private function stateDefinitions(): array
+    {
+        $configKeys = $this->deltaConfig['export_queue_entities'] ?? [];
+        $definitions = [];
+
+        foreach ($configKeys as $configKey) {
+            if (!is_string($configKey) || $configKey === '') {
+                continue;
+            }
+
+            $config = $this->deltaConfig[$configKey] ?? null;
+            if (!is_array($config)) {
+                continue;
+            }
+
+            $table = trim((string) ($config['state_table'] ?? ''));
+            $entityType = trim((string) ($config['entity_type'] ?? ''));
+            $identityField = trim((string) ($config['state_identity_field'] ?? ''));
+
+            if ($table === '' || $entityType === '' || $identityField === '') {
+                continue;
+            }
+
+            $definitions[] = [
+                'config_key' => $configKey,
+                'table' => $table,
+                'entity_type' => $entityType,
+                'entity_label' => (string) ($config['label'] ?? ucfirst($entityType)),
+                'identity_field' => $identityField,
+            ];
+        }
+
+        return $definitions;
+    }
+
+    private function stateSelectSql(): ?string
+    {
+        $selects = [];
+
+        foreach ($this->stateDefinitions() as $index => $definition) {
+            if (!$this->tableExists($definition['table'])) {
+                continue;
+            }
+
+            $selects[] = sprintf(
+                "SELECT %s AS entity_type, %s AS entity_label, %s AS state_table, CAST(`%s` AS CHAR) AS entity_id, last_exported_hash, last_seen_at FROM `%s`",
+                $this->stageDb->quote($definition['entity_type']),
+                $this->stageDb->quote($definition['entity_label']),
+                $this->stageDb->quote($definition['table']),
+                $definition['identity_field'],
+                $definition['table']
+            );
+        }
+
+        if ($selects === []) {
+            return null;
+        }
+
+        return implode(' UNION ALL ', $selects);
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $stmt = $this->stageDb->prepare('SHOW TABLES LIKE :table');
+        $stmt->execute([':table' => $table]);
+
+        return (bool) $stmt->fetchColumn();
     }
 
     private function rawTables(): array

@@ -177,13 +177,17 @@ $fieldGroups = [
     </div>
     <div class="col-12 col-xl-6">
         <div class="panel-card p-0 h-100">
-            <div class="card-header px-4 py-3"><h2 class="h5 mb-0">Stage-Tabellen</h2></div>
+            <div class="card-header px-4 py-3"><h2 class="h5 mb-0">Freigegebene Admin-Tabellen</h2></div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
-                    <thead><tr><th>Tabelle</th><th>Anzahl</th></tr></thead>
+                    <thead><tr><th>Label</th><th>Tabelle</th><th>Anzahl</th></tr></thead>
                     <tbody>
-                    <?php foreach ($stageCounts as $table => $count): ?>
-                        <tr><td><?= Html::escape($table) ?></td><td><?= Html::escape($count) ?></td></tr>
+                    <?php foreach ($stageCounts as $table): ?>
+                        <tr>
+                            <td><?= Html::escape($table['label']) ?></td>
+                            <td><code><?= Html::escape($table['table']) ?></code></td>
+                            <td><?= Html::escape($table['count']) ?></td>
+                        </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>

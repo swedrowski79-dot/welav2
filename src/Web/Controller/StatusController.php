@@ -19,7 +19,8 @@ final class StatusController extends Controller
     public function __invoke(Request $request): string
     {
         $stageDb = StageConnection::make();
-        $statusRepository = new StatusRepository($stageDb);
+        $adminConfig = \web_config('admin');
+        $statusRepository = new StatusRepository($stageDb, $adminConfig);
         $sourceRepository = new SourceStatusRepository();
         $config = \web_config('sources');
         $envRepository = new EnvFileRepository();
@@ -33,6 +34,7 @@ final class StatusController extends Controller
             'migrationSummary' => $migrationRepository->summary(),
             'migrationLastResult' => $migrationRepository->lastResult(),
             'config' => $config['sources'],
+            'adminConfig' => $adminConfig,
             'saved' => $request->query('saved') === '1',
             'migrationsDone' => $request->int('migrations_done'),
             'errorMessage' => $request->string('error'),

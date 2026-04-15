@@ -3,8 +3,8 @@
 <div class="panel-card p-4 mb-4">
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end">
         <div>
-            <h2 class="h5 mb-1">Produkt Export State</h2>
-            <div class="text-secondary small">Persistenter Delta-Zustand mit Produkt-ID, letztem Hash und letzter Sichtung.</div>
+            <h2 class="h5 mb-1">Export States</h2>
+            <div class="text-secondary small">Persistenter Delta-Zustand fuer Produkte, Medien und Dokumente mit letztem Hash und letzter Sichtung.</div>
         </div>
         <a class="btn btn-outline-secondary" href="/pipeline">Zurueck zu Pipeline & Queue</a>
     </div>
@@ -29,9 +29,18 @@
 
 <div class="panel-card p-4 mb-4">
     <form class="row g-3" method="get" action="/pipeline/state">
-        <div class="col-12 col-md-8">
+        <div class="col-12 col-md-6">
             <label class="form-label">Suche</label>
-            <input class="form-control" type="search" name="q" value="<?= Html::escape($search) ?>" placeholder="Produkt-ID oder Hash">
+            <input class="form-control" type="search" name="q" value="<?= Html::escape($filters['q']) ?>" placeholder="Entity-ID oder Hash">
+        </div>
+        <div class="col-12 col-md-4">
+            <label class="form-label">Entity Type</label>
+            <select class="form-select" name="entity_type">
+                <option value="">Alle</option>
+                <?php foreach (['product', 'media', 'document'] as $entityType): ?>
+                    <option value="<?= Html::escape($entityType) ?>" <?= $filters['entity_type'] === $entityType ? 'selected' : '' ?>><?= Html::escape($entityType) ?></option>
+                <?php endforeach; ?>
+            </select>
         </div>
         <div class="col-12 col-md-2">
             <label class="form-label">Pro Seite</label>
@@ -50,11 +59,16 @@
 <div class="panel-card p-0">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
-            <thead><tr><th>Product ID</th><th>Hash</th><th>Last Seen</th></tr></thead>
+            <thead><tr><th>Entity</th><th>ID</th><th>State Table</th><th>Hash</th><th>Last Seen</th></tr></thead>
             <tbody>
             <?php foreach ($entries as $entry): ?>
                 <tr>
-                    <td><span class="fw-semibold"><?= Html::escape($entry['product_id']) ?></span></td>
+                    <td>
+                        <div class="fw-semibold"><?= Html::escape($entry['entity_label'] ?? $entry['entity_type']) ?></div>
+                        <div class="small text-secondary"><?= Html::escape($entry['entity_type'] ?? '-') ?></div>
+                    </td>
+                    <td><span class="fw-semibold"><?= Html::escape($entry['entity_id']) ?></span></td>
+                    <td><code><?= Html::escape($entry['state_table'] ?? '-') ?></code></td>
                     <td>
                         <?php $hash = (string) ($entry['last_exported_hash'] ?? ''); ?>
                         <?php if ($hash === ''): ?>
@@ -71,6 +85,6 @@
     </div>
     <div class="d-flex justify-content-between align-items-center p-4">
         <div class="text-secondary small"><?= Html::escape($paginator->total) ?> Eintraege</div>
-        <?php $path = '/pipeline/state'; $query = ['q' => $search, 'per_page' => $paginator->perPage]; require dirname(__DIR__) . '/partials/pagination.php'; ?>
+        <?php $path = '/pipeline/state'; $query = ['q' => $filters['q'], 'entity_type' => $filters['entity_type'], 'per_page' => $paginator->perPage]; require dirname(__DIR__) . '/partials/pagination.php'; ?>
     </div>
 </div>

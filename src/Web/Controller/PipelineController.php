@@ -21,7 +21,7 @@ final class PipelineController extends Controller
     public function index(Request $request): string
     {
         $stageDb = StageConnection::make();
-        $repository = new PipelineAdminRepository($stageDb, \web_config('admin'));
+        $repository = new PipelineAdminRepository($stageDb, \web_config('admin'), \web_config('delta'));
         $monitoringRepository = new MonitoringRepository($stageDb);
         $schemaHealth = new SchemaHealthRepository();
         $consistencyRepository = new StageConsistencyRepository();
@@ -40,6 +40,7 @@ final class PipelineController extends Controller
         $recentLogs = $monitoringRepository->recentPipelineLogs((int) ($latestRun['id'] ?? 0), 10);
         $progressLogs = array_slice($recentLogs, 0, 5);
         $progressSummary = $this->progressSummary($focusRun, $latestRun, $activeLog, $progressLogs);
+        $pipelineSections = \PipelineConfig::sections('pipeline');
         $latestDeltaRun = $monitoringRepository->latestRunByTypes(['delta', 'expand']);
         $latestWorkerRun = $monitoringRepository->latestRunByTypes(['export_queue_worker']);
 
@@ -61,6 +62,7 @@ final class PipelineController extends Controller
             'activeLog' => $activeLog,
             'progressLogs' => $progressLogs,
             'progressSummary' => $progressSummary,
+            'pipelineSections' => $pipelineSections,
             'refreshSeconds' => $focusRun ? 10 : null,
             'runLogCount' => $monitoringRepository->countLogsForRun((int) ($latestRun['id'] ?? 0)),
             'latestError' => $monitoringRepository->latestPipelineError(),
@@ -78,17 +80,20 @@ final class PipelineController extends Controller
 
     public function state(Request $request): string
     {
-        $repository = new PipelineAdminRepository(StageConnection::make(), \web_config('admin'));
-        $search = $request->string('q');
+        $repository = new PipelineAdminRepository(StageConnection::make(), \web_config('admin'), \web_config('delta'));
+        $filters = [
+            'q' => $request->string('q'),
+            'entity_type' => $request->string('entity_type'),
+        ];
         $page = max(1, $request->int('page', 1));
         $perPage = $this->perPage($request);
-        $paginator = new Paginator($page, $perPage, $repository->countStateEntries($search));
+        $paginator = new Paginator($page, $perPage, $repository->countStateEntriesWithFilters($filters));
 
         return $this->render('pipeline/state', [
-            'pageTitle' => 'Produkt Export State',
-            'pageSubtitle' => 'Persistenter Delta-Zustand fuer Produkte mit letztem Hash und letzter Sichtung.',
-            'entries' => $repository->paginatedStateEntries($search, $paginator),
-            'search' => $search,
+            'pageTitle' => 'Export States',
+            'pageSubtitle' => 'Persistenter Delta-Zustand fuer Produkt-, Medien- und Dokument-Export mit letztem Hash und letzter Sichtung.',
+            'entries' => $repository->paginatedStateEntries($filters, $paginator),
+            'filters' => $filters,
             'paginator' => $paginator,
             'currentPath' => '/pipeline',
         ]);
@@ -153,8 +158,8 @@ final class PipelineController extends Controller
         $runType = (string) ($run['run_type'] ?? 'pipeline');
         $durationSeconds = max(0, (int) ($run['duration_seconds'] ?? 0));
         $headline = $isRunning
-            ? sprintf('%s laeuft gerade.', $this->humanizeRunType($runType))
-            : sprintf('Letzter Schritt: %s.', $this->humanizeRunType($runType));
+            ? sprintf('%s laeuft gerade.', \PipelineConfig::labelForRunType($runType))
+            : sprintf('Letzter Schritt: %s.', \PipelineConfig::labelForRunType($runType));
         $detail = 'Kein Fortschrittslog verfuegbar.';
 
         if (!empty($activeLog['message'])) {
@@ -243,22 +248,6 @@ final class PipelineController extends Controller
         }
 
         return null;
-    }
-
-    private function humanizeRunType(string $runType): string
-    {
-        return match ($runType) {
-            'import_all' => 'Import',
-            'import_products' => 'Produkt-Import',
-            'import_categories' => 'Kategorie-Import',
-            'merge' => 'Merge',
-            'expand' => 'Expand + Delta',
-            'xt_snapshot' => 'XT Snapshot',
-            'delta_products', 'delta' => 'Delta',
-            'export_queue_worker' => 'Export Worker',
-            'full_pipeline' => 'Full Pipeline inkl. Export',
-            default => $runType !== '' ? $runType : 'Pipeline',
-        };
     }
 
     private function formatDuration(int $seconds): string
