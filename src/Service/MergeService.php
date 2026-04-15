@@ -17,10 +17,13 @@ class MergeService
         $config = $this->mergeConfig['merge'] ?? [];
         unset($config['insert_batch_size']);
 
-        $this->mergeTable('stage_products', $config['stage_products']);
-        $this->mergeTable('stage_product_translations', $config['stage_product_translations']);
-        $this->mergeTable('stage_categories', $config['stage_categories']);
-        $this->mergeTable('stage_category_translations', $config['stage_category_translations']);
+        foreach ($config as $targetTable => $definition) {
+            if (!is_array($definition)) {
+                throw new RuntimeException("Merge definition for '{$targetTable}' must be an array.");
+            }
+
+            $this->mergeTable($targetTable, $definition);
+        }
     }
 
     private function mergeTable(string $targetTable, array $definition): void
@@ -30,6 +33,7 @@ class MergeService
         $baseTable = $definition['base'];
         $baseRows = $this->fetchRows($baseTable);
         $matches = $definition['match'] ?? [];
+        $requiredFields = $definition['required_fields'] ?? [];
         $matchIndexes = $this->buildMatchIndexes($matches);
         $batch = [];
 
@@ -44,6 +48,10 @@ class MergeService
             $merged = [];
             foreach ($definition['fields'] as $field => $fieldDef) {
                 $merged[$field] = $this->resolveField($fieldDef, $context);
+            }
+
+            if (!$this->hasRequiredFields($merged, $requiredFields)) {
+                continue;
             }
 
             $batch[] = $merged;
@@ -139,6 +147,22 @@ class MergeService
         }
 
         return $context[$table][$field] ?? null;
+    }
+
+    private function hasRequiredFields(array $row, array $requiredFields): bool
+    {
+        foreach ($requiredFields as $field) {
+            if (!is_string($field) || $field === '') {
+                throw new RuntimeException('Merge required_fields must contain only non-empty field names.');
+            }
+
+            $value = $row[$field] ?? null;
+            if ($value === null || $value === '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function insertRows(string $table, array $rows): void

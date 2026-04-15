@@ -1,7 +1,7 @@
 # Ticket: T-027
 
 ## Status
-open
+done
 
 ## Title
 Wire document/media data through merge and expand pipeline steps
@@ -33,3 +33,12 @@ Complete the pipeline wiring from raw document/image data to stage media/documen
 
 ## Notes
 If category-linked media exists in the AFS source, document it explicitly before implementing category media handling.
+
+## Implementation Notes
+- Wired `raw_afs_documents` into `stage_product_documents` through merge config and generic merge execution.
+- Mapped `title`, `file_name`, `path`, `source_path`, `document_type`, `sort_order`, and `position` so document rows are product-linked by `afs_artikel_id` and usable for downstream media-document linking.
+- Finalized document path handling by using the normalized `file_name` as stage `path` and preserving the original technical AFS path in `source_path`.
+- Added raw article image slot persistence for `Bild1..Bild10` and expanded those slots into `stage_product_media`.
+- `stage_product_media` now gets stable `media_external_id` values, explicit `source_slot`, `type = images`, `document_type = image`, and slot-based `sort_order` / `position`.
+- No category-linked media source relation is configured, so this ticket keeps media handling product-only.
+- No XT write/export logic was added.

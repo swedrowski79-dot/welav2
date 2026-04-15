@@ -23,6 +23,7 @@ try {
     foreach ([
         'stage_products',
         'stage_product_translations',
+        'stage_product_documents',
         'stage_categories',
         'stage_category_translations',
     ] as $table) {
@@ -31,7 +32,7 @@ try {
 
     $monitor->finish($runId, 'success', [
         'merged_records' => $mergedRecords,
-        'context' => ['tables' => 4],
+        'context' => ['tables' => 5],
     ], 'Merge abgeschlossen.');
 
     echo "Merge abgeschlossen.\n";

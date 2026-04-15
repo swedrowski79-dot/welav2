@@ -17,10 +17,10 @@ return [
 
             'merge_stage_products',
             'merge_stage_categories',
+            'merge_stage_documents',
 
             'expand_stage_attributes',
             'expand_stage_media',
-            'expand_stage_documents',
 
             'mirror_xt_products',
             'mirror_xt_categories',

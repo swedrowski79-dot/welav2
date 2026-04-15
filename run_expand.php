@@ -23,18 +23,27 @@ try {
     $deltaService = new ProductDeltaService($stageDb, $configDelta, $monitor, $runId);
     $deltaStats = $deltaService->run();
 
-    $expandedRecords = (int) $stageDb->query('SELECT COUNT(*) FROM `stage_attribute_translations`')->fetchColumn();
+    $expandedRecords = 0;
+    foreach ([
+        'stage_attribute_translations',
+        'stage_product_media',
+    ] as $table) {
+        $expandedRecords += (int) $stageDb->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn();
+    }
 
     $monitor->finish($runId, 'success', [
         'merged_records' => $expandedRecords,
         'error_count' => (int) ($deltaStats['errors'] ?? 0),
         'context' => [
-            'table' => 'stage_attribute_translations',
+            'tables' => [
+                'stage_attribute_translations',
+                'stage_product_media',
+            ],
             'delta' => $deltaStats,
         ],
-    ], 'Expand inklusive Produkt-Delta abgeschlossen.');
+    ], 'Expand von Attributen und Medien inklusive Produkt-Delta abgeschlossen.');
 
-    echo "Expand inklusive Produkt-Delta abgeschlossen.\n";
+    echo "Expand von Attributen und Medien inklusive Produkt-Delta abgeschlossen.\n";
 } catch (Throwable $exception) {
     $monitor->log($runId, 'error', 'Expand fehlgeschlagen.', [
         'exception' => $exception->getMessage(),

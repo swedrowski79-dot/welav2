@@ -79,6 +79,22 @@ return [
             ],
         ],
 
+        'stage_product_documents' => [
+            'base' => 'raw_afs_documents',
+            'required_fields' => ['afs_artikel_id', 'file_name'],
+            'fields' => [
+                'afs_document_id' => ['from' => ['raw_afs_documents.afs_document_id']],
+                'afs_artikel_id' => ['from' => ['raw_afs_documents.afs_artikel_id']],
+                'title' => ['from' => ['raw_afs_documents.title']],
+                'file_name' => ['from' => ['raw_afs_documents.file_name']],
+                'path' => ['from' => ['raw_afs_documents.file_name', 'raw_afs_documents.path'], 'strategy' => 'first_not_empty'],
+                'source_path' => ['from' => ['raw_afs_documents.path']],
+                'document_type' => ['from' => ['raw_afs_documents.document_type']],
+                'sort_order' => ['from' => ['raw_afs_documents.sort_order', 'raw_afs_documents.afs_document_id'], 'strategy' => 'first_not_empty'],
+                'position' => ['from' => ['raw_afs_documents.sort_order', 'raw_afs_documents.afs_document_id'], 'strategy' => 'first_not_empty'],
+            ],
+        ],
+
         'stage_categories' => [
             'base' => 'raw_afs_categories',
             'fields' => [

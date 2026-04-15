@@ -127,6 +127,11 @@ final class MigrationRepository
                 && $this->columnExists('stage_product_documents', 'source_path');
         }
 
+        if ($version === '009_add_raw_article_image_slots') {
+            return $this->columnExists('raw_afs_articles', 'image_1')
+                && $this->columnExists('raw_afs_articles', 'image_10');
+        }
+
         return false;
     }
 
