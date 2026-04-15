@@ -56,31 +56,14 @@ final class ExportQueueWorker
             $stats['processed']++;
 
             try {
-                $confirmedHash = $this->confirmedHash($entry);
-                $entityId = (int) ($entry['entity_id'] ?? 0);
-                $claimToken = (string) ($entry['claim_token'] ?? '');
-
-                if ($entityId <= 0) {
-                    throw new PermanentExportQueueException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
-                }
-
-                if ($claimToken === '') {
-                    throw new RuntimeException('Queue-Eintrag wurde nicht korrekt geclaimt.');
-                }
-
-                $this->stageDb->beginTransaction();
-
-                $this->markDone($queueId, $claimToken);
-                $this->updateConfirmedState($entityId, $confirmedHash);
-
-                $this->stageDb->commit();
+                $this->processEntry($entry);
                 $stats['done']++;
             } catch (Throwable $exception) {
                 if ($this->stageDb->inTransaction()) {
                     $this->stageDb->rollBack();
                 }
 
-                $result = $this->handleFailure($entry, $exception);
+                $result = $this->handleFailureSafely($entry, $exception);
                 $stats[$result]++;
                 $stats['error']++;
             }
@@ -204,6 +187,44 @@ final class ExportQueueWorker
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    private function processEntry(array $entry): void
+    {
+        $queueId = (int) ($entry['id'] ?? 0);
+        $entityId = (int) ($entry['entity_id'] ?? 0);
+        $claimToken = (string) ($entry['claim_token'] ?? '');
+        $confirmedHash = $this->confirmedHash($entry);
+
+        if ($entityId <= 0) {
+            throw new PermanentExportQueueException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
+        }
+
+        if ($claimToken === '') {
+            throw new RuntimeException('Queue-Eintrag wurde nicht korrekt geclaimt.');
+        }
+
+        $this->stageDb->beginTransaction();
+
+        try {
+            $this->updateConfirmedState($entityId, $confirmedHash);
+            $this->markDone($queueId, $claimToken);
+            $this->stageDb->commit();
+        } catch (Throwable $exception) {
+            if ($this->stageDb->inTransaction()) {
+                $this->stageDb->rollBack();
+            }
+
+            throw $exception;
+        }
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', 'Export Queue Eintrag verarbeitet.', [
+                'queue_id' => $queueId,
+                'entity_id' => $entityId,
+                'final_status' => 'done',
+            ]);
+        }
+    }
+
     private function confirmedHash(array $entry): string
     {
         $payload = json_decode((string) ($entry['payload'] ?? ''), true);
@@ -316,6 +337,23 @@ final class ExportQueueWorker
         $this->logFailure('error', 'Export Queue Eintrag fehlgeschlagen.', $context);
 
         return 'permanent_error';
+    }
+
+    private function handleFailureSafely(array $entry, Throwable $exception): string
+    {
+        try {
+            return $this->handleFailure($entry, $exception);
+        } catch (Throwable $failureException) {
+            $context = [
+                'queue_id' => (int) ($entry['id'] ?? 0),
+                'original_exception' => $exception->getMessage(),
+                'failure_handler_exception' => $failureException->getMessage(),
+            ];
+
+            $this->logFailure('error', 'Export Queue Fehlerbehandlung fehlgeschlagen.', $context);
+
+            return 'permanent_error';
+        }
     }
 
     private function logFailure(string $level, string $message, array $context): void
