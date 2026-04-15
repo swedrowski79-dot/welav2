@@ -251,7 +251,6 @@ final class ExportQueueWorker
         $stmt = $this->stageDb->prepare(
             "UPDATE `{$this->queueTable}`
              SET status = :status,
-                 claim_token = NULL,
                  processed_at = NOW(),
                  last_error = NULL
              WHERE id = :id AND claim_token = :claim_token"
@@ -313,7 +312,6 @@ final class ExportQueueWorker
             $stmt = $this->stageDb->prepare(
                 "UPDATE `{$this->queueTable}`
                  SET status = :status,
-                     claim_token = NULL,
                      processed_at = NOW(),
                      last_error = :last_error
                  WHERE id = :id AND claim_token = :claim_token"
