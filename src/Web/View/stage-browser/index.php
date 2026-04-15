@@ -29,6 +29,14 @@
 </div>
 
 <div class="panel-card p-0">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 p-4 border-bottom">
+        <div class="text-secondary small">
+            <?= Html::escape($paginator->total) ?> Zeilen
+            <span class="mx-1">|</span>
+            Seite <?= Html::escape($paginator->page) ?> von <?= Html::escape($paginator->totalPages()) ?>
+        </div>
+        <?php $path = '/stage-browser'; $query = ['table' => $currentTable, 'q' => $search, 'per_page' => $paginator->perPage]; require dirname(__DIR__) . '/partials/pagination.php'; ?>
+    </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
@@ -51,8 +59,12 @@
             </tbody>
         </table>
     </div>
-    <div class="d-flex justify-content-between align-items-center p-4">
-        <div class="text-secondary small"><?= Html::escape($paginator->total) ?> Zeilen</div>
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 p-4">
+        <div class="text-secondary small">
+            <?= Html::escape($paginator->total) ?> Zeilen
+            <span class="mx-1">|</span>
+            Seite <?= Html::escape($paginator->page) ?> von <?= Html::escape($paginator->totalPages()) ?>
+        </div>
         <?php $path = '/stage-browser'; $query = ['table' => $currentTable, 'q' => $search, 'per_page' => $paginator->perPage]; require dirname(__DIR__) . '/partials/pagination.php'; ?>
     </div>
 </div>

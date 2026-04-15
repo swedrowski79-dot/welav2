@@ -11,6 +11,8 @@ return [
         'raw_extra_category_translations' => 'Extra Kategorie-Uebersetzungen',
         'stage_products' => 'Stage Produkte',
         'stage_product_translations' => 'Stage Produkt-Uebersetzungen',
+        'stage_product_documents' => 'Stage Produkt-Dokumente',
+        'stage_product_media' => 'Stage Produkt-Medien',
         'stage_categories' => 'Stage Kategorien',
         'stage_category_translations' => 'Stage Kategorie-Uebersetzungen',
         'stage_attribute_translations' => 'Stage Attribut-Uebersetzungen',
