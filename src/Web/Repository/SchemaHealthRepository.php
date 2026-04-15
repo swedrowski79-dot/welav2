@@ -47,8 +47,24 @@ final class SchemaHealthRepository
             'stage_products' => [
                 'hash',
             ],
+            'stage_product_media' => [
+                'hash',
+            ],
+            'stage_product_documents' => [
+                'hash',
+            ],
             'product_export_state' => [
                 'product_id',
+                'last_exported_hash',
+                'last_seen_at',
+            ],
+            'product_media_export_state' => [
+                'entity_id',
+                'last_exported_hash',
+                'last_seen_at',
+            ],
+            'product_document_export_state' => [
+                'entity_id',
                 'last_exported_hash',
                 'last_seen_at',
             ],

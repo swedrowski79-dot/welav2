@@ -71,7 +71,9 @@ final class MigrationRepository
                 $this->stageDb->exec($sql);
                 $this->recordMigration($version, basename($path));
 
-                $this->stageDb->commit();
+                if ($this->stageDb->inTransaction()) {
+                    $this->stageDb->commit();
+                }
                 $executed[] = basename($path);
             } catch (\Throwable $exception) {
                 if ($this->stageDb->inTransaction()) {
@@ -130,6 +132,13 @@ final class MigrationRepository
         if ($version === '009_add_raw_article_image_slots') {
             return $this->columnExists('raw_afs_articles', 'image_1')
                 && $this->columnExists('raw_afs_articles', 'image_10');
+        }
+
+        if ($version === '011_add_media_document_delta_state') {
+            return $this->columnExists('stage_product_media', 'hash')
+                && $this->columnExists('stage_product_documents', 'hash')
+                && $this->tableExists('product_media_export_state')
+                && $this->tableExists('product_document_export_state');
         }
 
         return false;

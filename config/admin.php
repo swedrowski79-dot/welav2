@@ -18,5 +18,7 @@ return [
         'stage_attribute_translations' => 'Stage Attribut-Uebersetzungen',
         'export_queue' => 'Export Queue',
         'product_export_state' => 'Produkt Export State',
+        'product_media_export_state' => 'Produkt Medien Export State',
+        'product_document_export_state' => 'Produkt Dokument Export State',
     ],
 ];

@@ -2,64 +2,60 @@
 
 class ProductDeltaService
 {
+    private string $configKey;
+    private string $entityLabel;
     private string $entityType;
     private string $stageTable;
-    private string $translationTable;
-    private string $attributeTable;
+    private ?string $translationTable;
+    private ?string $attributeTable;
     private string $stateTable;
     private string $identityField;
+    private string $stateIdentityField;
     private string $hashField;
     private string $stateHashField;
     private string $stateLastSeenField;
-    private string $offlineHash;
+    private string $removedHash;
     private string $queueTable;
     private int $queueInsertBatchSize;
     private array $hashFields;
-    private array $pendingQueueSignatures = [];
+    private array $payloadFields;
+    private array $removedPayload;
+    private string $monitorSource;
+    private array $pendingQueueEntities = [];
     private array $queuedEntries = [];
 
     public function __construct(
         private PDO $stageDb,
-        array $deltaConfig,
+        private array $deltaConfig,
         private ?SyncMonitor $monitor = null,
-        private ?int $runId = null
+        private ?int $runId = null,
+        string $configKey = 'product_export_queue'
     ) {
-        $config = $deltaConfig['product_export_queue'] ?? [];
-
-        $this->entityType = (string) ($config['entity_type'] ?? 'product');
-        $this->stageTable = (string) ($config['stage_table'] ?? 'stage_products');
-        $this->translationTable = (string) ($config['translation_table'] ?? 'stage_product_translations');
-        $this->attributeTable = (string) ($config['attribute_table'] ?? 'stage_attribute_translations');
-        $this->stateTable = (string) ($config['state_table'] ?? 'product_export_state');
-        $this->identityField = (string) ($config['identity_field'] ?? 'afs_artikel_id');
-        $this->hashField = (string) ($config['hash_field'] ?? 'hash');
-        $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
-        $this->stateLastSeenField = (string) ($config['state_last_seen_field'] ?? 'last_seen_at');
-        $this->offlineHash = hash('sha256', (string) ($config['offline_hash_value'] ?? 'offline'));
-        $this->queueTable = (string) ($config['queue_table'] ?? 'export_queue');
-        $this->queueInsertBatchSize = max(1, (int) ($config['queue_insert_batch_size'] ?? 200));
-        $this->hashFields = is_array($config['hash_fields'] ?? null) ? $config['hash_fields'] : [];
+        $this->configKey = $configKey;
+        $this->applyConfig($configKey);
     }
 
     public function run(): array
     {
-        if ($this->hashFields === []) {
-            throw new RuntimeException('Delta config for product export queue is missing hash fields.');
+        if ($this->hashFields === [] && $this->payloadFields === []) {
+            throw new RuntimeException(
+                "Delta config '{$this->configKey}' must define hash_fields or payload_fields."
+            );
         }
 
         $runTimestamp = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
-        $products = $this->fetchProducts();
+        $entities = $this->fetchEntities();
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
         $states = $this->fetchStates();
-        $this->pendingQueueSignatures = $this->fetchExistingQueueSignatures();
+        $this->pendingQueueEntities = $this->fetchExistingQueueEntities();
         $this->queuedEntries = [];
 
         $stats = [
             'processed' => 0,
             'insert' => 0,
             'update' => 0,
-            'offline' => 0,
+            'removed' => 0,
             'unchanged' => 0,
             'deduplicated' => 0,
             'errors' => 0,
@@ -70,20 +66,20 @@ class ProductDeltaService
             "UPDATE `{$this->stageTable}` SET `{$this->hashField}` = :hash WHERE `{$this->identityField}` = :entity_id"
         );
         $upsertStateStmt = $this->stageDb->prepare(
-            "INSERT INTO `{$this->stateTable}` (`product_id`, `{$this->stateLastSeenField}`)
-             VALUES (:product_id, :last_seen_at)
+            "INSERT INTO `{$this->stateTable}` (`{$this->stateIdentityField}`, `{$this->stateLastSeenField}`)
+             VALUES (:state_id, :last_seen_at)
              ON DUPLICATE KEY UPDATE
                 `{$this->stateLastSeenField}` = VALUES(`{$this->stateLastSeenField}`)"
         );
-        $markOfflineStateStmt = $this->stageDb->prepare(
+        $markRemovedStateStmt = $this->stageDb->prepare(
             "UPDATE `{$this->stateTable}`
              SET `{$this->stateHashField}` = :hash
-             WHERE `product_id` = :product_id"
+             WHERE `{$this->stateIdentityField}` = :state_id"
         );
 
-        foreach ($products as $product) {
-            $entityId = (int) ($product[$this->identityField] ?? 0);
-            if ($entityId <= 0) {
+        foreach ($entities as $entity) {
+            $entityId = $this->normalizeEntityId($entity[$this->identityField] ?? null);
+            if ($entityId === null) {
                 continue;
             }
 
@@ -92,7 +88,7 @@ class ProductDeltaService
 
             try {
                 $payloadData = $this->buildPayloadData(
-                    $product,
+                    $entity,
                     $translations[$entityId] ?? [],
                     $attributes[$entityId] ?? []
                 );
@@ -121,14 +117,14 @@ class ProductDeltaService
                 }
 
                 $upsertStateStmt->execute([
-                    ':product_id' => $entityId,
+                    ':state_id' => $entityId,
                     ':last_seen_at' => $runTimestamp,
                 ]);
             } catch (Throwable $exception) {
                 $stats['errors']++;
                 $this->logRecordError(
                     $entityId,
-                    'Produkt-Delta konnte nicht berechnet werden.',
+                    "{$this->entityLabel}-Delta konnte nicht berechnet werden.",
                     $exception
                 );
             }
@@ -139,17 +135,17 @@ class ProductDeltaService
                 continue;
             }
 
-            if (($state[$this->stateHashField] ?? null) === $this->offlineHash) {
+            if (($state[$this->stateHashField] ?? null) === $this->removedHash) {
                 continue;
             }
 
             try {
-                if ($this->enqueueOfflineUpdate($entityId)) {
-                    $markOfflineStateStmt->execute([
-                        ':hash' => $this->offlineHash,
-                        ':product_id' => $entityId,
+                if ($this->enqueueRemovedUpdate($entityId)) {
+                    $markRemovedStateStmt->execute([
+                        ':hash' => $this->removedHash,
+                        ':state_id' => $entityId,
                     ]);
-                    $stats['offline']++;
+                    $stats['removed']++;
                 } else {
                     $stats['deduplicated']++;
                 }
@@ -157,22 +153,25 @@ class ProductDeltaService
                 $stats['errors']++;
                 $this->logRecordError(
                     $entityId,
-                    'Produkt-Deaktivierung konnte nicht in die Export Queue geschrieben werden.',
+                    "{$this->entityLabel}-Entfernung konnte nicht in die Export Queue geschrieben werden.",
                     $exception
                 );
             }
         }
 
         $this->flushQueuedEntries();
-        $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['offline'];
+        $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['removed'];
+        $stats['entity_type'] = $this->entityType;
+        $stats['config_key'] = $this->configKey;
 
         if ($this->monitor !== null) {
-            $this->monitor->log($this->runId, 'info', 'Produkt-Delta berechnet.', [
+            $this->monitor->log($this->runId, 'info', "{$this->entityLabel}-Delta berechnet.", [
+                'entity_type' => $this->entityType,
                 'processed' => $stats['processed'],
                 'changed' => $stats['changed'],
                 'insert' => $stats['insert'],
                 'update' => $stats['update'],
-                'offline' => $stats['offline'],
+                'removed' => $stats['removed'],
                 'deduplicated' => $stats['deduplicated'],
                 'errors' => $stats['errors'],
             ]);
@@ -181,7 +180,45 @@ class ProductDeltaService
         return $stats;
     }
 
-    private function fetchProducts(): array
+    private function applyConfig(string $configKey): void
+    {
+        $config = $this->deltaConfig[$configKey] ?? null;
+        if (!is_array($config)) {
+            throw new RuntimeException("Delta config '{$configKey}' not found.");
+        }
+
+        $this->entityLabel = (string) ($config['label'] ?? ucfirst((string) ($config['entity_type'] ?? 'entity')));
+        $this->entityType = (string) ($config['entity_type'] ?? 'product');
+        $this->stageTable = (string) ($config['stage_table'] ?? 'stage_products');
+        $this->translationTable = $this->normalizeTableName($config['translation_table'] ?? null);
+        $this->attributeTable = $this->normalizeTableName($config['attribute_table'] ?? null);
+        $this->stateTable = (string) ($config['state_table'] ?? 'product_export_state');
+        $this->identityField = (string) ($config['identity_field'] ?? 'afs_artikel_id');
+        $this->stateIdentityField = (string) ($config['state_identity_field'] ?? 'product_id');
+        $this->hashField = (string) ($config['hash_field'] ?? 'hash');
+        $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
+        $this->stateLastSeenField = (string) ($config['state_last_seen_field'] ?? 'last_seen_at');
+        $this->removedHash = hash('sha256', (string) ($config['removed_hash_value'] ?? $config['offline_hash_value'] ?? 'offline'));
+        $this->queueTable = (string) ($config['queue_table'] ?? 'export_queue');
+        $this->queueInsertBatchSize = max(1, (int) ($config['queue_insert_batch_size'] ?? 200));
+        $this->hashFields = is_array($config['hash_fields'] ?? null) ? $config['hash_fields'] : [];
+        $this->payloadFields = is_array($config['payload_fields'] ?? null) ? $config['payload_fields'] : [];
+        $this->removedPayload = is_array($config['removed_payload'] ?? null) ? $config['removed_payload'] : ['online' => 0];
+        $this->monitorSource = (string) ($config['monitor_source'] ?? 'delta_' . $this->entityType);
+    }
+
+    private function normalizeTableName(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $table = trim($value);
+
+        return $table === '' ? null : $table;
+    }
+
+    private function fetchEntities(): array
     {
         $stmt = $this->stageDb->query("SELECT * FROM `{$this->stageTable}` ORDER BY `{$this->identityField}` ASC");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -189,14 +226,18 @@ class ProductDeltaService
 
     private function fetchTranslations(): array
     {
+        if ($this->translationTable === null) {
+            return [];
+        }
+
         $stmt = $this->stageDb->query(
             "SELECT * FROM `{$this->translationTable}` ORDER BY `{$this->identityField}` ASC, `language_code` ASC"
         );
 
         $translations = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = (int) ($row[$this->identityField] ?? 0);
-            if ($entityId <= 0) {
+            $entityId = $this->normalizeEntityId($row[$this->identityField] ?? null);
+            if ($entityId === null) {
                 continue;
             }
 
@@ -226,14 +267,18 @@ class ProductDeltaService
 
     private function fetchAttributes(): array
     {
+        if ($this->attributeTable === null) {
+            return [];
+        }
+
         $stmt = $this->stageDb->query(
             "SELECT * FROM `{$this->attributeTable}` ORDER BY `{$this->identityField}` ASC, `language_code` ASC, `sort_order` ASC"
         );
 
         $attributes = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = (int) ($row[$this->identityField] ?? 0);
-            if ($entityId <= 0) {
+            $entityId = $this->normalizeEntityId($row[$this->identityField] ?? null);
+            if ($entityId === null) {
                 continue;
             }
 
@@ -252,15 +297,15 @@ class ProductDeltaService
     private function fetchStates(): array
     {
         $stmt = $this->stageDb->query(
-            "SELECT `product_id`, `{$this->stateHashField}`, `{$this->stateLastSeenField}`
+            "SELECT `{$this->stateIdentityField}`, `{$this->stateHashField}`, `{$this->stateLastSeenField}`
              FROM `{$this->stateTable}`
-             ORDER BY `product_id` ASC"
+             ORDER BY `{$this->stateIdentityField}` ASC"
         );
 
         $states = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = (int) ($row['product_id'] ?? 0);
-            if ($entityId <= 0) {
+            $entityId = $this->normalizeEntityId($row[$this->stateIdentityField] ?? null);
+            if ($entityId === null) {
                 continue;
             }
 
@@ -270,15 +315,25 @@ class ProductDeltaService
         return $states;
     }
 
-    private function buildPayloadData(array $product, array $translations, array $attributes): array
+    private function buildPayloadData(array $entity, array $translations, array $attributes): array
     {
-        $productPayload = [];
+        if ($this->payloadFields !== []) {
+            $payload = [];
+
+            foreach ($this->payloadFields as $field) {
+                $payload[$field] = $this->normalizeScalar($entity[$field] ?? null);
+            }
+
+            return $payload;
+        }
+
+        $entityPayload = [];
         foreach ($this->hashFields as $field) {
-            $productPayload[$field] = $this->normalizeScalar($product[$field] ?? null);
+            $entityPayload[$field] = $this->normalizeScalar($entity[$field] ?? null);
         }
 
         return [
-            'product' => $productPayload,
+            'product' => $entityPayload,
             'translations' => $translations,
             'attributes' => $attributes,
         ];
@@ -288,13 +343,13 @@ class ProductDeltaService
     {
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($json === false) {
-            throw new RuntimeException('Produkt-Payload konnte nicht serialisiert werden.');
+            throw new RuntimeException("{$this->entityLabel}-Payload konnte nicht serialisiert werden.");
         }
 
         return hash('sha256', $json);
     }
 
-    private function enqueue(int $entityId, string $action, array $payloadData, string $hash): bool
+    private function enqueue(string $entityId, string $action, array $payloadData, string $hash): bool
     {
         $payload = [
             'hash' => $hash,
@@ -304,14 +359,17 @@ class ProductDeltaService
         return $this->scheduleQueueEntry($entityId, $action, $payload);
     }
 
-    private function enqueueOfflineUpdate(int $entityId): bool
+    private function enqueueRemovedUpdate(string $entityId): bool
     {
-        $payload = ['online' => 0];
+        $payload = [
+            'hash' => $this->removedHash,
+            'data' => $this->removedPayload,
+        ];
 
         return $this->scheduleQueueEntry($entityId, 'update', $payload);
     }
 
-    private function fetchExistingQueueSignatures(): array
+    private function fetchExistingQueueEntities(): array
     {
         $restoreBufferedQuery = null;
 
@@ -321,7 +379,7 @@ class ProductDeltaService
         }
 
         $stmt = $this->stageDb->prepare(
-            "SELECT entity_id, action
+            "SELECT entity_id
              FROM `{$this->queueTable}`
              WHERE entity_type = :entity_type
                AND status IN ('pending', 'processing')"
@@ -331,17 +389,15 @@ class ProductDeltaService
                 ':entity_type' => $this->entityType,
             ]);
 
-            $signatures = [];
+            $entities = [];
 
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $entityId = (int) ($row['entity_id'] ?? 0);
-                $action = (string) ($row['action'] ?? '');
-
-                if ($entityId <= 0 || $action === '') {
+                $entityId = $this->normalizeEntityId($row['entity_id'] ?? null);
+                if ($entityId === null) {
                     continue;
                 }
 
-                $signatures[$this->queueSignature($entityId, $action)] = true;
+                $entities[$entityId] = true;
             }
         } finally {
             $stmt->closeCursor();
@@ -351,22 +407,21 @@ class ProductDeltaService
             }
         }
 
-        return $signatures;
+        return $entities;
     }
 
-    private function scheduleQueueEntry(int $entityId, string $action, array $payload): bool
+    private function scheduleQueueEntry(string $entityId, string $action, array $payload): bool
     {
         $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($payloadJson === false) {
             throw new RuntimeException('Export-Queue-Payload konnte nicht serialisiert werden.');
         }
 
-        $signature = $this->queueSignature($entityId, $action);
-        if (isset($this->pendingQueueSignatures[$signature])) {
+        if (isset($this->pendingQueueEntities[$entityId])) {
             return false;
         }
 
-        $this->pendingQueueSignatures[$signature] = true;
+        $this->pendingQueueEntities[$entityId] = true;
         $this->queuedEntries[] = [
             'entity_id' => $entityId,
             'action' => $action,
@@ -406,7 +461,7 @@ class ProductDeltaService
         foreach ($entries as $index => $entry) {
             $valueSql[] = "(:entity_type_{$index}, :entity_id_{$index}, :action_{$index}, :payload_{$index}, :status_{$index}, NOW())";
             $params[":entity_type_{$index}"] = $this->entityType;
-            $params[":entity_id_{$index}"] = (int) $entry['entity_id'];
+            $params[":entity_id_{$index}"] = (string) $entry['entity_id'];
             $params[":action_{$index}"] = (string) $entry['action'];
             $params[":payload_{$index}"] = (string) $entry['payload'];
             $params[":status_{$index}"] = 'pending';
@@ -430,27 +485,22 @@ class ProductDeltaService
         );
         $stmt->execute([
             ':entity_type' => $this->entityType,
-            ':entity_id' => (int) $entry['entity_id'],
+            ':entity_id' => (string) $entry['entity_id'],
             ':action' => (string) $entry['action'],
             ':payload' => (string) $entry['payload'],
             ':status' => 'pending',
         ]);
     }
 
-    private function queueSignature(int $entityId, string $action): string
-    {
-        return $entityId . '|' . $action;
-    }
-
-    private function logRecordError(int $entityId, string $message, Throwable $exception): void
+    private function logRecordError(string $entityId, string $message, Throwable $exception): void
     {
         if ($this->monitor === null) {
             return;
         }
 
         $context = [
-            'source' => 'delta_products',
-            'record_identifier' => (string) $entityId,
+            'source' => $this->monitorSource,
+            'record_identifier' => $entityId,
             'exception' => $exception->getMessage(),
         ];
 
@@ -484,5 +534,17 @@ class ProductDeltaService
         }
 
         return (string) $normalized;
+    }
+
+    private function normalizeEntityId(mixed $value): ?string
+    {
+        $normalized = $this->normalizeScalar($value);
+        if ($normalized === null) {
+            return null;
+        }
+
+        $entityId = trim((string) $normalized);
+
+        return $entityId === '' ? null : $entityId;
     }
 }

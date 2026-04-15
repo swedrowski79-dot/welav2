@@ -1,0 +1,2 @@
+ALTER TABLE export_queue
+    MODIFY COLUMN entity_id VARCHAR(255) NOT NULL;

@@ -1,7 +1,14 @@
 <?php
 
 return [
+    'export_queue_entities' => [
+        'product_export_queue',
+        'media_export_queue',
+        'document_export_queue',
+    ],
+
     'product_export_queue' => [
+        'label' => 'Produkt',
         'entity_type' => 'product',
         'queue_insert_batch_size' => 200,
         'worker_batch_size' => 100,
@@ -12,10 +19,15 @@ return [
         'attribute_table' => 'stage_attribute_translations',
         'state_table' => 'product_export_state',
         'identity_field' => 'afs_artikel_id',
+        'state_identity_field' => 'product_id',
         'hash_field' => 'hash',
         'state_hash_field' => 'last_exported_hash',
         'state_last_seen_field' => 'last_seen_at',
-        'offline_hash_value' => 'offline',
+        'removed_hash_value' => 'offline',
+        'removed_payload' => [
+            'online' => 0,
+        ],
+        'monitor_source' => 'delta_products',
         'hash_fields' => [
             'afs_artikel_id',
             'sku',
@@ -38,6 +50,70 @@ return [
             'is_standard',
             'master_sku',
             'online_flag',
+        ],
+    ],
+
+    'media_export_queue' => [
+        'label' => 'Medien',
+        'entity_type' => 'media',
+        'queue_insert_batch_size' => 200,
+        'worker_batch_size' => 100,
+        'worker_max_attempts' => 3,
+        'worker_retry_delay_seconds' => 300,
+        'stage_table' => 'stage_product_media',
+        'state_table' => 'product_media_export_state',
+        'identity_field' => 'media_external_id',
+        'state_identity_field' => 'entity_id',
+        'hash_field' => 'hash',
+        'state_hash_field' => 'last_exported_hash',
+        'state_last_seen_field' => 'last_seen_at',
+        'removed_hash_value' => 'removed',
+        'removed_payload' => [
+            'deleted' => 1,
+        ],
+        'monitor_source' => 'delta_media',
+        'payload_fields' => [
+            'media_external_id',
+            'afs_artikel_id',
+            'source_slot',
+            'file_name',
+            'path',
+            'type',
+            'document_type',
+            'sort_order',
+            'position',
+        ],
+    ],
+
+    'document_export_queue' => [
+        'label' => 'Dokument',
+        'entity_type' => 'document',
+        'queue_insert_batch_size' => 200,
+        'worker_batch_size' => 100,
+        'worker_max_attempts' => 3,
+        'worker_retry_delay_seconds' => 300,
+        'stage_table' => 'stage_product_documents',
+        'state_table' => 'product_document_export_state',
+        'identity_field' => 'afs_document_id',
+        'state_identity_field' => 'entity_id',
+        'hash_field' => 'hash',
+        'state_hash_field' => 'last_exported_hash',
+        'state_last_seen_field' => 'last_seen_at',
+        'removed_hash_value' => 'removed',
+        'removed_payload' => [
+            'deleted' => 1,
+        ],
+        'monitor_source' => 'delta_documents',
+        'payload_fields' => [
+            'afs_document_id',
+            'afs_artikel_id',
+            'title',
+            'file_name',
+            'path',
+            'source_path',
+            'document_type',
+            'sort_order',
+            'position',
         ],
     ],
 

@@ -168,9 +168,21 @@ final class PipelineAdminRepository
 
     public function resetDeltaState(): void
     {
-        $this->stageDb->exec('TRUNCATE TABLE `product_export_state`');
-        $this->logAdminAction('Produkt Export State wurde geleert.', [
+        $tables = ['product_export_state', 'product_media_export_state', 'product_document_export_state'];
+
+        foreach ($tables as $table) {
+            try {
+                $this->stageDb->exec("TRUNCATE TABLE `{$table}`");
+            } catch (\PDOException $exception) {
+                if (!$this->isMissingTable($exception)) {
+                    throw $exception;
+                }
+            }
+        }
+
+        $this->logAdminAction('Export States wurden geleert.', [
             'action' => 'reset_delta_state',
+            'tables' => $tables,
         ], 'warning');
     }
 

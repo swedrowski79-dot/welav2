@@ -8,34 +8,84 @@ final class PermanentExportQueueException extends RuntimeException
 
 final class ExportQueueWorker
 {
+    private array $configKeys;
+    private string $configKey;
     private string $queueTable;
     private string $stateTable;
     private string $entityType;
+    private string $stateIdentityField;
     private string $stateHashField;
-    private string $offlineHash;
+    private string $removedHash;
     private int $workerBatchSize;
     private int $workerMaxAttempts;
     private int $workerRetryDelaySeconds;
 
     public function __construct(
         private PDO $stageDb,
-        array $deltaConfig,
+        private array $deltaConfig,
         private ?SyncMonitor $monitor = null,
         private ?int $runId = null
     ) {
-        $config = $deltaConfig['product_export_queue'] ?? [];
+        $configKeys = $this->deltaConfig['export_queue_entities'] ?? ['product_export_queue'];
+        $this->configKeys = array_values(array_filter(
+            is_array($configKeys) ? $configKeys : [],
+            static fn (mixed $key): bool => is_string($key) && $key !== ''
+        ));
 
+        if ($this->configKeys === []) {
+            $this->configKeys = ['product_export_queue'];
+        }
+    }
+
+    public function run(?int $limit = null): array
+    {
+        $aggregate = [
+            'claimed' => 0,
+            'processed' => 0,
+            'done' => 0,
+            'retried' => 0,
+            'permanent_error' => 0,
+            'error' => 0,
+            'entities' => [],
+        ];
+
+        foreach ($this->configKeys as $configKey) {
+            $this->applyConfig($configKey);
+            $entityStats = $this->runCurrentEntity($limit);
+            $aggregate['entities'][$this->entityType] = $entityStats;
+
+            foreach (['claimed', 'processed', 'done', 'retried', 'permanent_error', 'error'] as $field) {
+                $aggregate[$field] += (int) ($entityStats[$field] ?? 0);
+            }
+        }
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', 'Export Queue verarbeitet.', $aggregate);
+        }
+
+        return $aggregate;
+    }
+
+    private function applyConfig(string $configKey): void
+    {
+        $config = $this->deltaConfig[$configKey] ?? null;
+        if (!is_array($config)) {
+            throw new RuntimeException("Delta config '{$configKey}' not found for export queue worker.");
+        }
+
+        $this->configKey = $configKey;
         $this->queueTable = (string) ($config['queue_table'] ?? 'export_queue');
         $this->stateTable = (string) ($config['state_table'] ?? 'product_export_state');
         $this->entityType = (string) ($config['entity_type'] ?? 'product');
+        $this->stateIdentityField = (string) ($config['state_identity_field'] ?? 'product_id');
         $this->stateHashField = (string) ($config['state_hash_field'] ?? 'last_exported_hash');
-        $this->offlineHash = hash('sha256', (string) ($config['offline_hash_value'] ?? 'offline'));
+        $this->removedHash = hash('sha256', (string) ($config['removed_hash_value'] ?? $config['offline_hash_value'] ?? 'offline'));
         $this->workerBatchSize = max(1, (int) ($config['worker_batch_size'] ?? 100));
         $this->workerMaxAttempts = max(1, (int) ($config['worker_max_attempts'] ?? 3));
         $this->workerRetryDelaySeconds = max(0, (int) ($config['worker_retry_delay_seconds'] ?? 300));
     }
 
-    public function run(?int $limit = null): array
+    private function runCurrentEntity(?int $limit = null): array
     {
         $entries = $this->claimPendingEntries($limit ?? $this->workerBatchSize);
         $stats = [
@@ -45,6 +95,8 @@ final class ExportQueueWorker
             'retried' => 0,
             'permanent_error' => 0,
             'error' => 0,
+            'entity_type' => $this->entityType,
+            'config_key' => $this->configKey,
         ];
 
         foreach ($entries as $entry) {
@@ -67,10 +119,6 @@ final class ExportQueueWorker
                 $stats[$result]++;
                 $stats['error']++;
             }
-        }
-
-        if ($this->monitor !== null) {
-            $this->monitor->log($this->runId, 'info', 'Export Queue verarbeitet.', $stats);
         }
 
         return $stats;
@@ -154,6 +202,7 @@ final class ExportQueueWorker
                     'selected_count' => $selectedCount,
                     'updated_count' => $updatedCount,
                     'claim_token' => $claimToken,
+                    'entity_type' => $this->entityType,
                 ]);
             }
 
@@ -190,11 +239,11 @@ final class ExportQueueWorker
     private function processEntry(array $entry): void
     {
         $queueId = (int) ($entry['id'] ?? 0);
-        $entityId = (int) ($entry['entity_id'] ?? 0);
+        $entityId = trim((string) ($entry['entity_id'] ?? ''));
         $claimToken = (string) ($entry['claim_token'] ?? '');
         $confirmedHash = $this->confirmedHash($entry);
 
-        if ($entityId <= 0) {
+        if ($entityId === '') {
             throw new PermanentExportQueueException('Queue-Eintrag enthaelt keine gueltige Entity-ID.');
         }
 
@@ -220,6 +269,7 @@ final class ExportQueueWorker
             $this->monitor->log($this->runId, 'info', 'Export Queue Eintrag verarbeitet.', [
                 'queue_id' => $queueId,
                 'entity_id' => $entityId,
+                'entity_type' => $this->entityType,
                 'final_status' => 'done',
             ]);
         }
@@ -233,17 +283,16 @@ final class ExportQueueWorker
             throw new PermanentExportQueueException('Queue-Payload ist kein gueltiges JSON.');
         }
 
-        if (($entry['action'] ?? '') === 'update' && (($payload['online'] ?? null) === 0 || ($payload['online'] ?? null) === '0')) {
-            return $this->offlineHash;
-        }
-
         $hash = $payload['hash'] ?? null;
-
-        if (!is_string($hash) || trim($hash) === '') {
-            throw new PermanentExportQueueException('Queue-Payload enthaelt keinen bestaetigbaren Hash.');
+        if (is_string($hash) && trim($hash) !== '') {
+            return $hash;
         }
 
-        return $hash;
+        if (($entry['action'] ?? '') === 'update' && (($payload['online'] ?? null) === 0 || ($payload['online'] ?? null) === '0')) {
+            return $this->removedHash;
+        }
+
+        throw new PermanentExportQueueException('Queue-Payload enthaelt keinen bestaetigbaren Hash.');
     }
 
     private function markDone(int $queueId, string $claimToken): void
@@ -275,6 +324,7 @@ final class ExportQueueWorker
         $hasAttemptsLeft = $attemptCount < $this->workerMaxAttempts;
         $context = [
             'queue_id' => $queueId,
+            'entity_type' => $this->entityType,
             'attempt_count' => $attemptCount,
             'max_attempts' => $this->workerMaxAttempts,
             'retryable' => $retryable,
@@ -344,6 +394,7 @@ final class ExportQueueWorker
         } catch (Throwable $failureException) {
             $context = [
                 'queue_id' => (int) ($entry['id'] ?? 0),
+                'entity_type' => $this->entityType,
                 'original_exception' => $exception->getMessage(),
                 'failure_handler_exception' => $failureException->getMessage(),
             ];
@@ -371,17 +422,17 @@ final class ExportQueueWorker
         }
     }
 
-    private function updateConfirmedState(int $entityId, string $hash): void
+    private function updateConfirmedState(string $entityId, string $hash): void
     {
         $stmt = $this->stageDb->prepare(
-            "INSERT INTO `{$this->stateTable}` (`product_id`, `{$this->stateHashField}`, `last_seen_at`)
-             VALUES (:product_id, :hash, NOW())
+            "INSERT INTO `{$this->stateTable}` (`{$this->stateIdentityField}`, `{$this->stateHashField}`, `last_seen_at`)
+             VALUES (:state_id, :hash, NOW())
              ON DUPLICATE KEY UPDATE
                 `{$this->stateHashField}` = VALUES(`{$this->stateHashField}`),
                 `last_seen_at` = VALUES(`last_seen_at`)"
         );
         $stmt->execute([
-            ':product_id' => $entityId,
+            ':state_id' => $entityId,
             ':hash' => $hash,
         ]);
     }

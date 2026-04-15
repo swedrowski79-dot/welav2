@@ -209,9 +209,11 @@ CREATE TABLE IF NOT EXISTS stage_product_media (
     document_type VARCHAR(255) NULL,
     sort_order INT NULL,
     position INT NULL,
+    hash VARCHAR(64) NULL,
     KEY idx_stage_product_media_external_id (media_external_id),
     KEY idx_stage_product_media_afs_artikel_id (afs_artikel_id),
-    KEY idx_stage_product_media_type (type)
+    KEY idx_stage_product_media_type (type),
+    KEY idx_stage_product_media_hash (hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS stage_product_documents (
@@ -225,9 +227,11 @@ CREATE TABLE IF NOT EXISTS stage_product_documents (
     document_type VARCHAR(255) NULL,
     sort_order INT NULL,
     position INT NULL,
+    hash VARCHAR(64) NULL,
     KEY idx_stage_product_documents_afs_document_id (afs_document_id),
     KEY idx_stage_product_documents_afs_artikel_id (afs_artikel_id),
-    KEY idx_stage_product_documents_document_type (document_type)
+    KEY idx_stage_product_documents_document_type (document_type),
+    KEY idx_stage_product_documents_hash (hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS sync_runs (
@@ -282,7 +286,7 @@ CREATE TABLE IF NOT EXISTS sync_errors (
 CREATE TABLE IF NOT EXISTS export_queue (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     entity_type VARCHAR(50) NOT NULL,
-    entity_id INT NOT NULL,
+    entity_id VARCHAR(255) NOT NULL,
     action VARCHAR(20) NOT NULL,
     payload JSON NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -306,4 +310,18 @@ CREATE TABLE IF NOT EXISTS product_export_state (
     last_exported_hash VARCHAR(64) NULL,
     last_seen_at DATETIME NOT NULL,
     KEY idx_product_export_state_last_seen_at (last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS product_media_export_state (
+    entity_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    last_exported_hash VARCHAR(64) NULL,
+    last_seen_at DATETIME NOT NULL,
+    KEY idx_product_media_export_state_last_seen_at (last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS product_document_export_state (
+    entity_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    last_exported_hash VARCHAR(64) NULL,
+    last_seen_at DATETIME NOT NULL,
+    KEY idx_product_document_export_state_last_seen_at (last_seen_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

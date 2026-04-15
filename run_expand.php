@@ -4,6 +4,7 @@ require __DIR__ . '/src/Database/ConnectionFactory.php';
 require __DIR__ . '/src/Monitoring/SyncMonitor.php';
 require __DIR__ . '/src/Service/ExpandService.php';
 require __DIR__ . '/src/Service/ProductDeltaService.php';
+require __DIR__ . '/src/Service/DeltaRunnerService.php';
 
 $configSources = require __DIR__ . '/config/sources.php';
 $configExpand = require __DIR__ . '/config/expand.php';
@@ -20,7 +21,7 @@ $runId = $monitor->start('expand', [
 try {
     $monitor->log($runId, 'info', 'Expand gestartet.');
     $expandService->run();
-    $deltaService = new ProductDeltaService($stageDb, $configDelta, $monitor, $runId);
+    $deltaService = new DeltaRunnerService($stageDb, $configDelta, $monitor, $runId);
     $deltaStats = $deltaService->run();
 
     $expandedRecords = 0;
@@ -41,9 +42,9 @@ try {
             ],
             'delta' => $deltaStats,
         ],
-    ], 'Expand von Attributen und Medien inklusive Produkt-Delta abgeschlossen.');
+    ], 'Expand von Attributen, Medien und Delta abgeschlossen.');
 
-    echo "Expand von Attributen und Medien inklusive Produkt-Delta abgeschlossen.\n";
+    echo "Expand von Attributen, Medien und Delta abgeschlossen.\n";
 } catch (Throwable $exception) {
     $monitor->log($runId, 'error', 'Expand fehlgeschlagen.', [
         'exception' => $exception->getMessage(),
