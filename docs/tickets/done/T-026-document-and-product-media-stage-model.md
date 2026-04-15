@@ -1,7 +1,7 @@
 # Ticket: T-026
 
 ## Status
-open
+done
 
 ## Title
 Design and implement stage tables for product documents and product images
@@ -31,3 +31,10 @@ Introduce the missing stage-level tables and mapping model for document/image da
 
 ## Notes
 This ticket should align the stage schema with the already referenced `stage_product_documents` and any needed product image/media table.
+
+## Implementation Notes
+- Added `stage_product_documents` for product-linked file/doc rows using `afs_document_id` as the source-side document identity.
+- Added `stage_product_media` for product-linked image/media rows with a dedicated `media_external_id` for future XT media identity mapping.
+- Both tables include `afs_artikel_id` as the product relation and model `file_name`, `path`, `document_type`, and `sort_order`.
+- `position` was added alongside `sort_order` to stay compatible with the existing downstream `config/xt_write.php` expectations.
+- No merge, expand, or writer population logic was added in this ticket.
