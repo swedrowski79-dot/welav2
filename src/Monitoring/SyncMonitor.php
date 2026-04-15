@@ -17,6 +17,8 @@ final class SyncMonitor
             return null;
         }
 
+        $this->closeStaleRuns($runType);
+
         $stmt = $this->stageDb->prepare(
             'INSERT INTO sync_runs (run_type, status, started_at, context_json)
              VALUES (:run_type, :status, NOW(), :context_json)'
@@ -28,6 +30,24 @@ final class SyncMonitor
         ]);
 
         return (int) $this->stageDb->lastInsertId();
+    }
+
+    private function closeStaleRuns(string $runType): void
+    {
+        $stmt = $this->stageDb->prepare(
+            'UPDATE sync_runs
+             SET status = :failed_status,
+                 ended_at = NOW(),
+                 message = :message
+             WHERE run_type = :run_type
+               AND status = :running_status'
+        );
+        $stmt->execute([
+            ':failed_status' => 'failed',
+            ':message' => 'Vorheriger Lauf wurde als veraltet beendet, bevor ein neuer Lauf gestartet wurde.',
+            ':run_type' => $runType,
+            ':running_status' => 'running',
+        ]);
     }
 
     public function log(?int $runId, string $level, string $message, array $context = []): void

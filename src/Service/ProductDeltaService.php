@@ -313,28 +313,42 @@ class ProductDeltaService
 
     private function fetchExistingQueueSignatures(): array
     {
+        $restoreBufferedQuery = null;
+
+        if (defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY')) {
+            $restoreBufferedQuery = (bool) $this->stageDb->getAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY);
+            $this->stageDb->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        }
+
         $stmt = $this->stageDb->prepare(
-            "SELECT entity_id, action, payload
+            "SELECT entity_id, action
              FROM `{$this->queueTable}`
              WHERE entity_type = :entity_type
                AND status IN ('pending', 'processing')"
         );
-        $stmt->execute([
-            ':entity_type' => $this->entityType,
-        ]);
+        try {
+            $stmt->execute([
+                ':entity_type' => $this->entityType,
+            ]);
 
-        $signatures = [];
+            $signatures = [];
 
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = (int) ($row['entity_id'] ?? 0);
-            $action = (string) ($row['action'] ?? '');
-            $payloadJson = (string) ($row['payload'] ?? '');
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $entityId = (int) ($row['entity_id'] ?? 0);
+                $action = (string) ($row['action'] ?? '');
 
-            if ($entityId <= 0 || $action === '' || $payloadJson === '') {
-                continue;
+                if ($entityId <= 0 || $action === '') {
+                    continue;
+                }
+
+                $signatures[$this->queueSignature($entityId, $action)] = true;
             }
+        } finally {
+            $stmt->closeCursor();
 
-            $signatures[$this->queueSignature($entityId, $action, $payloadJson)] = true;
+            if ($restoreBufferedQuery !== null) {
+                $this->stageDb->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, $restoreBufferedQuery);
+            }
         }
 
         return $signatures;
@@ -347,7 +361,7 @@ class ProductDeltaService
             throw new RuntimeException('Export-Queue-Payload konnte nicht serialisiert werden.');
         }
 
-        $signature = $this->queueSignature($entityId, $action, $payloadJson);
+        $signature = $this->queueSignature($entityId, $action);
         if (isset($this->pendingQueueSignatures[$signature])) {
             return false;
         }
@@ -423,9 +437,9 @@ class ProductDeltaService
         ]);
     }
 
-    private function queueSignature(int $entityId, string $action, string $payloadJson): string
+    private function queueSignature(int $entityId, string $action): string
     {
-        return $entityId . '|' . $action . '|' . hash('sha256', $payloadJson);
+        return $entityId . '|' . $action;
     }
 
     private function logRecordError(int $entityId, string $message, Throwable $exception): void
