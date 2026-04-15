@@ -8,13 +8,16 @@ use App\Web\Core\Controller;
 use App\Web\Core\Paginator;
 use App\Web\Core\Request;
 use App\Web\Repository\MonitoringRepository;
+use App\Web\Repository\PipelineAdminRepository;
 use App\Web\Repository\StageConnection;
 
 final class ErrorController extends Controller
 {
     public function index(Request $request): string
     {
-        $repository = new MonitoringRepository(StageConnection::make());
+        $stageDb = StageConnection::make();
+        $repository = new MonitoringRepository($stageDb);
+        $pipelineRepository = new PipelineAdminRepository($stageDb, \web_config('admin'));
         $filters = [
             'status' => $request->string('status'),
             'q' => $request->string('q'),
@@ -28,6 +31,9 @@ final class ErrorController extends Controller
             'pageTitle' => 'Monitoring Fehler',
             'pageSubtitle' => 'Fehlerfaelle mit Ursache, Details und Laufbezug.',
             'errors' => $repository->paginatedErrors($filters, $paginator),
+            'recentExportWorkerIssues' => $repository->recentExportWorkerIssues(10),
+            'queueIssueSummary' => $pipelineRepository->queueIssueSummary(),
+            'recentQueueIssues' => $pipelineRepository->recentQueueIssues(10),
             'filters' => $filters,
             'paginator' => $paginator,
             'resetDone' => $request->string('reset_done'),

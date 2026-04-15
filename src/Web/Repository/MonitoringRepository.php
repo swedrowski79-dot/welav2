@@ -309,6 +309,32 @@ final class MonitoringRepository
         return $this->fetchOne('SELECT * FROM sync_errors ORDER BY created_at DESC LIMIT 1');
     }
 
+    public function recentExportWorkerIssues(int $limit = 20): array
+    {
+        try {
+            $stmt = $this->stageDb->prepare(
+                'SELECT l.*, r.run_type, r.status AS run_status
+                 FROM sync_logs l
+                 INNER JOIN sync_runs r ON r.id = l.sync_run_id
+                 WHERE r.run_type = :run_type
+                   AND l.level IN ("warning", "error")
+                 ORDER BY l.created_at DESC, l.id DESC
+                 LIMIT :limit'
+            );
+            $stmt->bindValue(':run_type', 'export_queue_worker');
+            $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+            $stmt->execute();
+
+            return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return [];
+            }
+
+            throw $exception;
+        }
+    }
+
     public function runSummary(): array
     {
         try {

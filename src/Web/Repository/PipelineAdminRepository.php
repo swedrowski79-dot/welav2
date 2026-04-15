@@ -112,6 +112,92 @@ final class PipelineAdminRepository
         }
     }
 
+    public function queueIssueSummary(): array
+    {
+        try {
+            $stmt = $this->stageDb->query(
+                "SELECT entity_type,
+                        status,
+                        COUNT(*) AS item_count
+                 FROM export_queue
+                 WHERE COALESCE(last_error, '') <> ''
+                 GROUP BY entity_type, status
+                 ORDER BY entity_type ASC, status ASC"
+            );
+
+            $summary = [
+                'total' => 0,
+                'pending' => 0,
+                'processing' => 0,
+                'done' => 0,
+                'error' => 0,
+                'entities' => [],
+            ];
+
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                $entityType = (string) ($row['entity_type'] ?? 'unknown');
+                $status = (string) ($row['status'] ?? 'unknown');
+                $count = (int) ($row['item_count'] ?? 0);
+
+                $summary['total'] += $count;
+
+                if (array_key_exists($status, $summary)) {
+                    $summary[$status] += $count;
+                }
+
+                $summary['entities'][$entityType] ??= [
+                    'pending' => 0,
+                    'processing' => 0,
+                    'done' => 0,
+                    'error' => 0,
+                ];
+
+                if (array_key_exists($status, $summary['entities'][$entityType])) {
+                    $summary['entities'][$entityType][$status] += $count;
+                }
+            }
+
+            return $summary;
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return [
+                    'total' => 0,
+                    'pending' => 0,
+                    'processing' => 0,
+                    'done' => 0,
+                    'error' => 0,
+                    'entities' => [],
+                ];
+            }
+
+            throw $exception;
+        }
+    }
+
+    public function recentQueueIssues(int $limit = 20): array
+    {
+        try {
+            $columns = $this->queueSelectColumns();
+            $stmt = $this->stageDb->prepare(
+                "SELECT {$columns}
+                 FROM export_queue
+                 WHERE COALESCE(last_error, '') <> ''
+                 ORDER BY COALESCE(processed_at, claimed_at, available_at, created_at) DESC, id DESC
+                 LIMIT :limit"
+            );
+            $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+            $stmt->execute();
+
+            return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return [];
+            }
+
+            throw $exception;
+        }
+    }
+
     public function stateSummary(): array
     {
         return [

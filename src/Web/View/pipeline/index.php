@@ -283,6 +283,86 @@
 <?php endif; ?>
 
 <div class="panel-card p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">
+        <div>
+            <h2 class="h5 mb-1">XT-/Exportprobleme</h2>
+            <div class="small text-secondary">Retry-faehige XT-Exportfehler und Queue-Eintraege mit `last_error` werden hier getrennt von generischen Pipeline-Logs sichtbar gemacht.</div>
+        </div>
+        <a class="btn btn-sm btn-outline-danger" href="/errors">Zur Fehleransicht</a>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3">
+            <div class="border rounded-4 p-3 bg-light-subtle">
+                <div class="small text-secondary">Queue-Probleme gesamt</div>
+                <div class="fw-semibold"><?= Html::escape($queueIssueSummary['total'] ?? 0) ?></div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="border rounded-4 p-3 bg-light-subtle">
+                <div class="small text-secondary">Pending mit Fehler</div>
+                <div class="fw-semibold"><?= Html::escape($queueIssueSummary['pending'] ?? 0) ?></div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="border rounded-4 p-3 bg-light-subtle">
+                <div class="small text-secondary">Error mit Fehler</div>
+                <div class="fw-semibold"><?= Html::escape($queueIssueSummary['error'] ?? 0) ?></div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="border rounded-4 p-3 bg-light-subtle">
+                <div class="small text-secondary">Worker-Warnungen</div>
+                <div class="fw-semibold"><?= Html::escape(count($recentExportWorkerIssues ?? [])) ?></div>
+            </div>
+        </div>
+    </div>
+    <div class="row g-4">
+        <div class="col-12 col-xl-6">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="fw-semibold mb-2">Letzte Worker-Probleme</div>
+                <?php if (empty($recentExportWorkerIssues)): ?>
+                    <div class="small text-secondary">Keine aktuellen Export-Worker-Warnungen oder -Fehler.</div>
+                <?php else: ?>
+                    <div class="d-grid gap-2">
+                        <?php foreach ($recentExportWorkerIssues as $issue): ?>
+                            <div class="border rounded-3 p-2 bg-white">
+                                <div class="d-flex justify-content-between gap-2">
+                                    <span class="badge <?= Html::badgeClass($issue['level'] ?? 'warning') ?>"><?= Html::escape($issue['level'] ?? 'warning') ?></span>
+                                    <div class="small text-secondary"><?= Html::escape($issue['created_at'] ?? '-') ?></div>
+                                </div>
+                                <div class="small fw-semibold mt-2"><?= Html::escape($issue['message'] ?? '') ?></div>
+                                <div class="small text-secondary mt-1 truncate-cell"><code><?= Html::escape($issue['context_json'] ?? '{}') ?></code></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="col-12 col-xl-6">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                <div class="fw-semibold mb-2">Letzte Queue-Eintraege mit Fehler</div>
+                <?php if (empty($recentQueueIssues)): ?>
+                    <div class="small text-secondary">Keine Queue-Eintraege mit `last_error` vorhanden.</div>
+                <?php else: ?>
+                    <div class="d-grid gap-2">
+                        <?php foreach ($recentQueueIssues as $issue): ?>
+                            <div class="border rounded-3 p-2 bg-white">
+                                <div class="d-flex justify-content-between gap-2">
+                                    <div class="small fw-semibold"><?= Html::escape(($issue['entity_type'] ?? '-') . ' #' . ($issue['entity_id'] ?? '-')) ?></div>
+                                    <span class="badge <?= Html::badgeClass($issue['status'] ?? 'error') ?>"><?= Html::escape($issue['status'] ?? '-') ?></span>
+                                </div>
+                                <div class="small text-secondary mt-1">Action <?= Html::escape($issue['action'] ?? '-') ?> · Attempts <?= Html::escape($issue['attempt_count'] ?? 0) ?></div>
+                                <div class="small text-danger mt-2"><?= Html::escape($issue['last_error'] ?? '') ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card p-4 mb-4">
     <div class="row g-3">
         <div class="col-12 col-lg-8">
             <h2 class="h5 mb-1">Arbeitsansicht fuer Queue und Pipeline</h2>
