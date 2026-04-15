@@ -19,6 +19,18 @@ class Normalizer
         $result = [];
 
         foreach ($entityConfig['fields'] as $target => $source) {
+            if (is_array($source)) {
+                $sourceField = (string) ($source['source'] ?? '');
+                $value = $sourceField !== '' ? ($row[$sourceField] ?? null) : null;
+
+                if (isset($source['transform']) && is_string($source['transform']) && $source['transform'] !== '') {
+                    $value = $this->resolveCalculated($source['transform'], [$target => $value], $row);
+                }
+
+                $result[$target] = $value;
+                continue;
+            }
+
             $result[$target] = $row[$source] ?? null;
         }
 
@@ -65,6 +77,20 @@ class Normalizer
 
             case 'calc:afs_category_online_flag':
                 return 1;
+
+            case 'calc:normalize_image_filename':
+                $value = reset($normalized);
+                if ($value === null || $value === '') {
+                    return $value;
+                }
+
+                $path = trim((string) $value);
+                if ($path === '') {
+                    return $value;
+                }
+
+                $normalizedPath = str_replace('\\', '/', $path);
+                return basename($normalizedPath);
 
             default:
                 throw new RuntimeException("Unknown calculated resolver: {$resolver}");

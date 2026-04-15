@@ -36,8 +36,14 @@ return [
                 'level'         => 'Ebene',
                 'name'          => 'Bezeichnung',
                 'description'   => 'Beschreibung',
-                'image'         => 'Bild',
-                'header_image'  => 'Bild_gross',
+                'image'         => [
+                    'source' => 'Bild',
+                    'transform' => 'calc:normalize_image_filename',
+                ],
+                'header_image'  => [
+                    'source' => 'Bild_gross',
+                    'transform' => 'calc:normalize_image_filename',
+                ],
                 'online_flag'   => 'Internet',
             ],
             'calculated' => [
