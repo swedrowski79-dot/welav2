@@ -68,4 +68,4 @@ Make expand and delta runtime visible separately and collect enough diagnostics 
 
 ## Result
 
-Completed locally. Commit created as part of the ticket workflow; push remains intentionally pending until explicitly requested.
+Completed locally in commit `5bde387` (`Implement T-033 expand diagnostics`). Push remains intentionally pending until explicitly requested.

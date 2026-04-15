@@ -100,4 +100,4 @@ If expand becomes a recurrent bottleneck, use the new per-definition diagnostics
 
 # Commit
 
-- Pending
+- `5bde387` - `Implement T-033 expand diagnostics`
