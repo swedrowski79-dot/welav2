@@ -79,6 +79,10 @@ $qualifiedAfsTable = static function (string $tableName) use ($env): string {
     return $schema . '.' . $table;
 };
 
+$afsArticlesTable = $qualifiedAfsTable($env('AFS_ARTICLES_TABLE', 'Artikel'));
+$afsCategoriesTable = $qualifiedAfsTable($env('AFS_CATEGORIES_TABLE', 'Warengruppe'));
+$afsDocumentsTable = $qualifiedAfsTable($env('AFS_DOCUMENTS_TABLE', 'Dokument'));
+
 $detectExtraPath = static function () use ($projectRoot): string {
     $explicit = getenv('EXTRA_SQLITE_PATH');
     if ($explicit !== false && $explicit !== '') {
@@ -118,7 +122,7 @@ return [
             ],
                 'entities' => [
                 'articles' => [
-                    'table' => $qualifiedAfsTable($env('AFS_ARTICLES_TABLE', 'Artikel')),
+                    'table' => $afsArticlesTable,
                     'columns' => [
                         'Artikel',
                         'Art',
@@ -166,7 +170,7 @@ return [
                     ],
                 ],
                 'categories' => [
-                    'table' => $qualifiedAfsTable($env('AFS_CATEGORIES_TABLE', 'Warengruppe')),
+                    'table' => $afsCategoriesTable,
                     'columns' => [
                         'Warengruppe',
                         'Art',
@@ -183,13 +187,16 @@ return [
                     ],
                 ],
                 'documents' => [
-                    'table' => $qualifiedAfsTable($env('AFS_DOCUMENTS_TABLE', 'Dokument')),
+                    'table' => $afsDocumentsTable,
                     'columns' => [
                         'Zaehler',
                         'Artikel',
                         'Titel',
                         'Dateiname',
                         'Art',
+                    ],
+                    'where' => [
+                        "Artikel IN (SELECT Artikel FROM {$afsArticlesTable} WHERE Internet = 1 AND Art < 255 AND Mandant = 1)",
                     ],
                 ],
             ],

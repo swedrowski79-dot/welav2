@@ -42,3 +42,4 @@ This ticket should not yet decide final stage/media modeling. It should stop at 
 - `ImportWorkflow` imports AFS documents together with the product-side raw import path.
 - The default AFS documents source was aligned to the live environment name `Dokument`, while remaining overrideable through `AFS_DOCUMENTS_TABLE`.
 - The live raw mapping uses `Zaehler`, `Artikel`, `Titel`, `Dateiname`, and `Art` because the current AFS source does not expose the originally assumed `Dokumente` columns.
+- The raw documents source is further constrained to `Artikel` values that match the same relevant AFS article set used by the product import (`Internet = 1`, `Art < 255`, `Mandant = 1`).
