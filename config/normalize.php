@@ -55,7 +55,10 @@ return [
             'fields' => [
                 'afs_document_id' => 'Zaehler',
                 'afs_artikel_id'  => 'Artikel',
-                'name'            => 'Titel',
+                'title'           => [
+                    'source' => 'Titel',
+                    'transform' => 'calc:normalize_image_filename',
+                ],
                 'file_name'       => [
                     'source' => 'Dateiname',
                     'transform' => 'calc:normalize_image_filename',

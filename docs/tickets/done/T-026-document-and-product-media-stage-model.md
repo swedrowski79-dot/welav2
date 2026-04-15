@@ -37,4 +37,7 @@ This ticket should align the stage schema with the already referenced `stage_pro
 - Added `stage_product_media` for product-linked image/media rows with a dedicated `media_external_id` for future XT media identity mapping.
 - Both tables include `afs_artikel_id` as the product relation and model `file_name`, `path`, `document_type`, and `sort_order`.
 - `position` was added alongside `sort_order` to stay compatible with the existing downstream `config/xt_write.php` expectations.
+- `stage_product_documents` now also includes a dedicated `title` field for the normalized human-readable document label from AFS `Titel`.
+- `stage_product_documents.source_path` was added so future pipeline steps can preserve the original technical source path independently from `title` and `file_name`.
+- AFS `Titel` is explicitly treated as display title, not as `file_name`; if it contains a path, only the basename belongs in `title`.
 - No merge, expand, or writer population logic was added in this ticket.

@@ -121,6 +121,12 @@ final class MigrationRepository
                 && $this->columnExists('export_queue', 'claimed_at');
         }
 
+        if ($version === '008_add_document_title_fields') {
+            return $this->columnExists('raw_afs_documents', 'title')
+                && $this->columnExists('stage_product_documents', 'title')
+                && $this->columnExists('stage_product_documents', 'source_path');
+        }
+
         return false;
     }
 
