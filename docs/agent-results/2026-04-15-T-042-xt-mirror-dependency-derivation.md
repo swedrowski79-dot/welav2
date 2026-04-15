@@ -120,3 +120,7 @@ Implement `T-042` by deriving XT mirror coverage directly from the active writer
 # Recommended next step
 
 Run one real XT snapshot refresh against the intended live XT API endpoint after that endpoint is updated to the current `wela-api` code, then compare the mirrored raw tables against the live XT database contents as a final environment-level confirmation.
+
+# Commit
+
+- `615b8c7` - `Implement T-042 XT mirror derivation`
