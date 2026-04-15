@@ -23,7 +23,9 @@ try {
     $monitor->finish($runId, 'success', [
         'merged_records' => (int) ($stats['changed'] ?? 0),
         'error_count' => (int) ($stats['errors'] ?? 0),
-        'context' => $stats,
+        'context' => [
+            'delta' => $stats,
+        ],
     ], 'Delta abgeschlossen.');
 
     echo "Delta abgeschlossen.\n";

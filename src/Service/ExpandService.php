@@ -6,13 +6,15 @@ class ExpandService
 
     public function __construct(
         private PDO $stageDb,
-        private array $expandConfig
+        private array $expandConfig,
+        private ?SyncMonitor $monitor = null,
+        private ?int $runId = null
     ) {
         $definitions = $this->expandConfig['expand'] ?? [];
         $this->insertBatchSize = max(1, (int) ($definitions['insert_batch_size'] ?? 500));
     }
 
-    public function run(): void
+    public function run(): array
     {
         $definitions = $this->expandConfig['expand'] ?? null;
 
@@ -22,16 +24,45 @@ class ExpandService
 
         unset($definitions['insert_batch_size']);
 
+        $startedAt = microtime(true);
+        $stats = [
+            'definitions' => [],
+            'definitions_count' => 0,
+            'source_rows' => 0,
+            'written_rows' => 0,
+            'insert_batches' => 0,
+            'duration_seconds' => 0.0,
+        ];
+
         foreach ($definitions as $definitionName => $definition) {
             if (!is_array($definition)) {
                 throw new RuntimeException("Expand definition '{$definitionName}' must be an array.");
             }
 
-            $this->expandDefinition($definitionName, $definition);
+            $definitionStats = $this->expandDefinition($definitionName, $definition);
+            $stats['definitions'][$definitionName] = $definitionStats;
+            $stats['definitions_count']++;
+            $stats['source_rows'] += (int) ($definitionStats['source_rows'] ?? 0);
+            $stats['written_rows'] += (int) ($definitionStats['written_rows'] ?? 0);
+            $stats['insert_batches'] += (int) ($definitionStats['insert_batches'] ?? 0);
         }
+
+        $stats['duration_seconds'] = $this->roundDuration(microtime(true) - $startedAt);
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', 'Expand abgeschlossen.', [
+                'definitions_count' => $stats['definitions_count'],
+                'source_rows' => $stats['source_rows'],
+                'written_rows' => $stats['written_rows'],
+                'insert_batches' => $stats['insert_batches'],
+                'duration_seconds' => $stats['duration_seconds'],
+            ]);
+        }
+
+        return $stats;
     }
 
-    private function expandDefinition(string $definitionName, array $definition): void
+    private function expandDefinition(string $definitionName, array $definition): array
     {
         $mode = $definition['mode'] ?? 'attribute_slots';
 
@@ -40,19 +71,17 @@ class ExpandService
         }
 
         if ($mode === 'attribute_slots') {
-            $this->expandAttributeSlots($definitionName, $definition);
-            return;
+            return $this->expandAttributeSlots($definitionName, $definition);
         }
 
         if ($mode === 'media_slots') {
-            $this->expandMediaSlots($definitionName, $definition);
-            return;
+            return $this->expandMediaSlots($definitionName, $definition);
         }
 
         throw new RuntimeException("Expand definition '{$definitionName}' uses an unsupported mode '{$mode}'.");
     }
 
-    private function expandAttributeSlots(string $definitionName, array $definition): void
+    private function expandAttributeSlots(string $definitionName, array $definition): array
     {
         $sourceTable = $definition['source'] ?? null;
         $targetTable = $definition['target'] ?? null;
@@ -70,40 +99,63 @@ class ExpandService
             throw new RuntimeException("Expand definition '{$definitionName}' is missing slots.");
         }
 
-        $this->stageDb->exec("TRUNCATE TABLE `{$targetTable}`");
+        $sourceColumns = ['afs_artikel_id', 'sku', 'language_code', 'source_directory'];
+        foreach ($slots as $slotIndex => $slot) {
+            if (!is_array($slot)) {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} must be an array."
+                );
+            }
 
-        $select = $this->stageDb->query("SELECT * FROM `{$sourceTable}`");
+            $nameField = $slot['name'] ?? null;
+            $valueField = $slot['value'] ?? null;
+            $sortOrder = $slot['sort'] ?? null;
+
+            if (!is_string($nameField) || $nameField === '') {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid name field."
+                );
+            }
+
+            if (!is_string($valueField) || $valueField === '') {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid value field."
+                );
+            }
+
+            if (!is_int($sortOrder) && !ctype_digit((string) $sortOrder)) {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid sort value."
+                );
+            }
+
+            $sourceColumns[] = $nameField;
+            $sourceColumns[] = $valueField;
+        }
+
+        $startedAt = microtime(true);
+        $sourceRows = 0;
+        $writtenRows = 0;
+        $insertBatches = 0;
+
+        $this->stageDb->exec('TRUNCATE TABLE ' . $this->quoteIdentifier($targetTable));
+
+        $select = $this->stageDb->query(
+            sprintf(
+                'SELECT %s FROM %s',
+                $this->buildSelectColumnList($sourceColumns),
+                $this->quoteIdentifier($sourceTable)
+            )
+        );
         $batch = [];
 
         while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
-            foreach ($slots as $slotIndex => $slot) {
-                if (!is_array($slot)) {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} must be an array."
-                    );
-                }
+            $sourceRows++;
 
+            foreach ($slots as $slotIndex => $slot) {
                 $nameField = $slot['name'] ?? null;
                 $valueField = $slot['value'] ?? null;
                 $sortOrder = $slot['sort'] ?? null;
-
-                if (!is_string($nameField) || $nameField === '') {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid name field."
-                    );
-                }
-
-                if (!is_string($valueField) || $valueField === '') {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid value field."
-                    );
-                }
-
-                if (!is_int($sortOrder) && !ctype_digit((string) $sortOrder)) {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid sort value."
-                    );
-                }
 
                 $attributeName = $this->normalizeString($row[$nameField] ?? null);
                 $attributeValue = $this->normalizeString($row[$valueField] ?? null);
@@ -123,18 +175,36 @@ class ExpandService
                 ];
 
                 if (count($batch) >= $this->insertBatchSize) {
-                    $this->insertRows($targetTable, $batch);
+                    $writtenRows += $this->insertRows($targetTable, $batch);
+                    $insertBatches++;
                     $batch = [];
                 }
             }
         }
 
         if ($batch !== []) {
-            $this->insertRows($targetTable, $batch);
+            $writtenRows += $this->insertRows($targetTable, $batch);
+            $insertBatches++;
         }
+
+        $stats = [
+            'mode' => 'attribute_slots',
+            'source_table' => $sourceTable,
+            'target_table' => $targetTable,
+            'source_rows' => $sourceRows,
+            'written_rows' => $writtenRows,
+            'insert_batches' => $insertBatches,
+            'duration_seconds' => $this->roundDuration(microtime(true) - $startedAt),
+        ];
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', "Expand-Definition '{$definitionName}' abgeschlossen.", $stats);
+        }
+
+        return $stats;
     }
 
-    private function expandMediaSlots(string $definitionName, array $definition): void
+    private function expandMediaSlots(string $definitionName, array $definition): array
     {
         $sourceTable = $definition['source'] ?? null;
         $targetTable = $definition['target'] ?? null;
@@ -152,42 +222,63 @@ class ExpandService
             throw new RuntimeException("Expand definition '{$definitionName}' is missing slots.");
         }
 
-        $this->stageDb->exec("TRUNCATE TABLE `{$targetTable}`");
+        $sourceColumns = ['afs_artikel_id'];
+        foreach ($slots as $slotIndex => $slot) {
+            if (!is_array($slot)) {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} must be an array."
+                );
+            }
 
-        $select = $this->stageDb->query("SELECT * FROM `{$sourceTable}`");
+            $sourceField = $slot['source'] ?? null;
+            $slotName = $slot['slot'] ?? null;
+            $sortOrder = $slot['sort'] ?? null;
+
+            if (!is_string($sourceField) || $sourceField === '') {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid source field."
+                );
+            }
+
+            if (!is_string($slotName) || $slotName === '') {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid slot name."
+                );
+            }
+
+            if (!is_int($sortOrder) && !ctype_digit((string) $sortOrder)) {
+                throw new RuntimeException(
+                    "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid sort value."
+                );
+            }
+
+            $sourceColumns[] = $sourceField;
+        }
+
+        $startedAt = microtime(true);
+        $sourceRows = 0;
+        $writtenRows = 0;
+        $insertBatches = 0;
+
+        $this->stageDb->exec('TRUNCATE TABLE ' . $this->quoteIdentifier($targetTable));
+
+        $select = $this->stageDb->query(
+            sprintf(
+                'SELECT %s FROM %s',
+                $this->buildSelectColumnList($sourceColumns),
+                $this->quoteIdentifier($sourceTable)
+            )
+        );
         $batch = [];
 
         while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
+            $sourceRows++;
             $afsArtikelId = $row['afs_artikel_id'] ?? null;
 
             foreach ($slots as $slotIndex => $slot) {
-                if (!is_array($slot)) {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} must be an array."
-                    );
-                }
-
                 $sourceField = $slot['source'] ?? null;
                 $slotName = $slot['slot'] ?? null;
                 $sortOrder = $slot['sort'] ?? null;
-
-                if (!is_string($sourceField) || $sourceField === '') {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid source field."
-                    );
-                }
-
-                if (!is_string($slotName) || $slotName === '') {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid slot name."
-                    );
-                }
-
-                if (!is_int($sortOrder) && !ctype_digit((string) $sortOrder)) {
-                    throw new RuntimeException(
-                        "Expand definition '{$definitionName}' slot at index {$slotIndex} is missing a valid sort value."
-                    );
-                }
 
                 $path = $this->normalizeString($row[$sourceField] ?? null);
 
@@ -217,15 +308,33 @@ class ExpandService
                 ];
 
                 if (count($batch) >= $this->insertBatchSize) {
-                    $this->insertRows($targetTable, $batch);
+                    $writtenRows += $this->insertRows($targetTable, $batch);
+                    $insertBatches++;
                     $batch = [];
                 }
             }
         }
 
         if ($batch !== []) {
-            $this->insertRows($targetTable, $batch);
+            $writtenRows += $this->insertRows($targetTable, $batch);
+            $insertBatches++;
         }
+
+        $stats = [
+            'mode' => 'media_slots',
+            'source_table' => $sourceTable,
+            'target_table' => $targetTable,
+            'source_rows' => $sourceRows,
+            'written_rows' => $writtenRows,
+            'insert_batches' => $insertBatches,
+            'duration_seconds' => $this->roundDuration(microtime(true) - $startedAt),
+        ];
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', "Expand-Definition '{$definitionName}' abgeschlossen.", $stats);
+        }
+
+        return $stats;
     }
 
     private function normalizeString(mixed $value): ?string
@@ -249,10 +358,10 @@ class ExpandService
         return 'afs-article-' . trim((string) $afsArtikelId) . '-' . $slotName;
     }
 
-    private function insertRows(string $table, array $rows): void
+    private function insertRows(string $table, array $rows): int
     {
         if ($rows === []) {
-            return;
+            return 0;
         }
 
         $columns = array_keys($rows[0]);
@@ -271,8 +380,45 @@ class ExpandService
             $valueGroups[] = '(' . implode(',', $placeholders) . ')';
         }
 
-        $sql = "INSERT INTO `{$table}` (`" . implode('`,`', $columns) . "`) VALUES " . implode(',', $valueGroups);
+        $sql = 'INSERT INTO ' . $this->quoteIdentifier($table)
+            . ' (' . implode(',', array_map([$this, 'quoteIdentifier'], $columns)) . ') VALUES '
+            . implode(',', $valueGroups);
         $stmt = $this->stageDb->prepare($sql);
         $stmt->execute($params);
+
+        return count($rows);
+    }
+
+    private function buildSelectColumnList(array $columns): string
+    {
+        $uniqueColumns = [];
+
+        foreach ($columns as $column) {
+            if (!is_string($column) || $column === '') {
+                continue;
+            }
+
+            $uniqueColumns[$column] = true;
+        }
+
+        if ($uniqueColumns === []) {
+            throw new RuntimeException('Expand select column list cannot be empty.');
+        }
+
+        return implode(', ', array_map([$this, 'quoteIdentifier'], array_keys($uniqueColumns)));
+    }
+
+    private function quoteIdentifier(string $identifier): string
+    {
+        if (!preg_match('/^[A-Za-z0-9_]+$/', $identifier)) {
+            throw new RuntimeException("Invalid SQL identifier '{$identifier}' in expand configuration.");
+        }
+
+        return '`' . $identifier . '`';
+    }
+
+    private function roundDuration(float $seconds): float
+    {
+        return round($seconds, 3);
     }
 }

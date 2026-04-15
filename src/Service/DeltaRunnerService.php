@@ -23,6 +23,7 @@ class DeltaRunnerService
 
     public function run(): array
     {
+        $startedAt = microtime(true);
         $aggregate = [
             'processed' => 0,
             'insert' => 0,
@@ -50,6 +51,21 @@ class DeltaRunnerService
             foreach (['processed', 'insert', 'update', 'removed', 'unchanged', 'deduplicated', 'errors', 'changed'] as $field) {
                 $aggregate[$field] += (int) ($stats[$field] ?? 0);
             }
+        }
+
+        $aggregate['duration_seconds'] = round(microtime(true) - $startedAt, 3);
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', 'Delta abgeschlossen.', [
+                'processed' => $aggregate['processed'],
+                'changed' => $aggregate['changed'],
+                'insert' => $aggregate['insert'],
+                'update' => $aggregate['update'],
+                'removed' => $aggregate['removed'],
+                'deduplicated' => $aggregate['deduplicated'],
+                'errors' => $aggregate['errors'],
+                'duration_seconds' => $aggregate['duration_seconds'],
+            ]);
         }
 
         return $aggregate;

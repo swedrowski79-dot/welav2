@@ -12,15 +12,15 @@ $configDelta = require __DIR__ . '/config/delta.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
 
-$expandService = new ExpandService($stageDb, $configExpand);
 $monitor = new SyncMonitor($stageDb);
 $runId = $monitor->start('expand', [
     'script' => 'run_expand.php',
 ]);
+$expandService = new ExpandService($stageDb, $configExpand, $monitor, $runId);
 
 try {
     $monitor->log($runId, 'info', 'Expand gestartet.');
-    $expandService->run();
+    $expandStats = $expandService->run();
     $deltaService = new DeltaRunnerService($stageDb, $configDelta, $monitor, $runId);
     $deltaStats = $deltaService->run();
 
@@ -40,6 +40,7 @@ try {
                 'stage_attribute_translations',
                 'stage_product_media',
             ],
+            'expand' => $expandStats,
             'delta' => $deltaStats,
         ],
     ], 'Expand von Attributen, Medien und Delta abgeschlossen.');
