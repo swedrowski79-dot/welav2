@@ -105,7 +105,8 @@ final class ExportQueueWorker
                  FROM `{$this->queueTable}`
                  WHERE status = :status
                    AND entity_type = :entity_type
-                   AND available_at <= NOW()
+                   AND claim_token IS NULL
+                   AND (available_at IS NULL OR available_at <= NOW())
                  ORDER BY available_at ASC, created_at ASC, id ASC
                  LIMIT :limit
                  FOR UPDATE"
@@ -116,6 +117,15 @@ final class ExportQueueWorker
             $stmt->execute();
 
             $queueIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+            $selectedCount = count($queueIds);
+
+            if ($this->monitor !== null) {
+                $this->monitor->log($this->runId, 'info', 'Export Queue Claim-Auswahl ermittelt.', [
+                    'selected_count' => $selectedCount,
+                    'limit' => $limit,
+                    'entity_type' => $this->entityType,
+                ]);
+            }
 
             if ($queueIds === []) {
                 $this->stageDb->commit();
@@ -127,6 +137,8 @@ final class ExportQueueWorker
             $params = [
                 ':claim_token' => $claimToken,
                 ':processing_status' => 'processing',
+                ':status' => 'pending',
+                ':entity_type' => $this->entityType,
             ];
 
             foreach ($queueIds as $index => $queueId) {
@@ -141,13 +153,35 @@ final class ExportQueueWorker
                      attempt_count = attempt_count + 1,
                      claim_token = :claim_token,
                      claimed_at = NOW()
-                 WHERE id IN (%s)",
+                 WHERE id IN (%s)
+                   AND status = :status
+                   AND entity_type = :entity_type
+                   AND claim_token IS NULL
+                   AND (available_at IS NULL OR available_at <= NOW())",
                 $this->queueTable,
                 implode(', ', $placeholders)
             );
 
             $claimStmt = $this->stageDb->prepare($claimSql);
             $claimStmt->execute($params);
+            $updatedCount = $claimStmt->rowCount();
+
+            if ($this->monitor !== null) {
+                $this->monitor->log($this->runId, 'info', 'Export Queue Claim-Update ausgefuehrt.', [
+                    'selected_count' => $selectedCount,
+                    'updated_count' => $updatedCount,
+                    'claim_token' => $claimToken,
+                ]);
+            }
+
+            if ($updatedCount < 1) {
+                throw new RuntimeException('Es konnten keine pending Queue-Eintraege geclaimt werden.');
+            }
+
+            if ($updatedCount !== $selectedCount) {
+                throw new RuntimeException('Nicht alle ausgewaehlten Queue-Eintraege konnten geclaimt werden.');
+            }
+
             $this->stageDb->commit();
         } catch (Throwable $exception) {
             if ($this->stageDb->inTransaction()) {
