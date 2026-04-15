@@ -171,10 +171,10 @@ final class PipelineController extends Controller
             'import_products' => 'Produkt-Import',
             'import_categories' => 'Kategorie-Import',
             'merge' => 'Merge',
-            'expand' => 'Expand',
+            'expand' => 'Expand + Delta',
             'delta_products', 'delta' => 'Delta',
             'export_queue_worker' => 'Export Worker',
-            'full_pipeline' => 'Full Pipeline',
+            'full_pipeline' => 'Full Pipeline inkl. Export',
             default => $runType !== '' ? $runType : 'Pipeline',
         };
     }

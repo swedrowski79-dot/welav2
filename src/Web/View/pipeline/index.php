@@ -81,7 +81,7 @@
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h2 class="h5 mb-1">Pipeline-Steuerung</h2>
-                    <div class="text-secondary small">Die Aktionen sind entlang des Pipeline-Flusses gruppiert, damit Import, Verarbeitung, Delta und Gesamtlauf sofort erkennbar sind.</div>
+                    <div class="text-secondary small">Die Aktionen sind entlang des aktuellen Pipeline-Flusses gruppiert: Import, Merge, Expand inklusive Delta und anschliessender Export-Worker.</div>
                 </div>
                 <div class="d-flex gap-2">
                     <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Produkt Export State</a>
@@ -99,25 +99,25 @@
                 ],
                 [
                     'title' => '2. Processing (Merge / Expand)',
-                    'description' => 'RAW-Daten zu Stage-Daten verdichten und anschliessend erweiterte Attributzeilen erzeugen.',
+                    'description' => 'RAW-Daten zu Stage-Daten verdichten. Expand erzeugt die erweiterten Stage-Daten und fuehrt danach direkt den Delta-Lauf aus.',
                     'jobs' => [
                         ['job' => 'merge', 'label' => 'Run Merge', 'class' => 'btn-outline-primary', 'help' => 'Fuehrt RAW-Quellen zu den Stage-Grunddaten zusammen.'],
-                        ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary', 'help' => 'Erzeugt expandierte Attributzeilen und anschliessende Folgeinformationen.'],
+                        ['job' => 'expand', 'label' => 'Run Expand', 'class' => 'btn-outline-secondary', 'help' => 'Erzeugt expandierte Stage-Daten und startet im selben Lauf die Delta-Berechnung.'],
                     ],
                 ],
                 [
-                    'title' => '3. Delta',
-                    'description' => 'Aenderungen gegen den bestaetigten Export-Stand erkennen und Queue-Eintraege bzw. Worker-Schritte ausfuehren.',
+                    'title' => '3. Delta / Export',
+                    'description' => 'Delta kann bei Bedarf separat erneut ausgefuehrt werden. Der Export Worker verarbeitet danach die Queue bis zum aktuell implementierten XT-Sync-Endpunkt.',
                     'jobs' => [
-                        ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark', 'help' => 'Berechnet Produktaenderungen und fuellt die Export Queue.'],
-                        ['job' => 'export_queue_worker', 'label' => 'Run Export Worker', 'class' => 'btn-outline-dark', 'help' => 'Bestaetigt Queue-Eintraege und aktualisiert den bestaetigten Export-Status.'],
+                        ['job' => 'delta', 'label' => 'Run Delta', 'class' => 'btn-outline-dark', 'help' => 'Optionaler manueller Delta-Neulauf fuer erneute Queue-Befuellung ohne neuen Expand-Lauf.'],
+                        ['job' => 'export_queue_worker', 'label' => 'Run Export Worker', 'class' => 'btn-outline-dark', 'help' => 'Verarbeitet Queue-Eintraege, schreibt in XT und bestaetigt danach den Export-Status.'],
                     ],
                 ],
                 [
                     'title' => '4. Full Pipeline',
-                    'description' => 'Gesamtlauf fuer einen kompletten Durchgang von Import bis Verarbeitung.',
+                    'description' => 'Gesamtlauf fuer einen kompletten Durchgang von Import bis Export Worker.',
                     'jobs' => [
-                        ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark', 'help' => 'Startet Import, Merge und Expand in der vorgesehenen Reihenfolge.'],
+                        ['job' => 'full_pipeline', 'label' => 'Run Full Pipeline', 'class' => 'btn-dark', 'help' => 'Startet Import, Merge, Expand inklusive Delta und anschliessend den Export Worker.'],
                     ],
                 ],
             ] as $section): ?>
@@ -180,7 +180,7 @@
     <div class="d-flex justify-content-between align-items-start mb-3">
         <div>
             <h2 class="h5 mb-1">Ausfuehrungsstatus</h2>
-            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle. Bei laufenden Jobs wird die Seite leichtgewichtig automatisch aktualisiert.</div>
+            <div class="text-secondary small">Aktueller oder letzter Pipeline-Schritt fuer manuelle Tests und Laufkontrolle. Expand steht dabei fuer Expand inklusive Delta; die Full Pipeline endet erst nach dem Export Worker.</div>
         </div>
         <?php $statusLabel = $runningRun ? 'running' : 'idle'; ?>
         <span class="badge <?= Html::badgeClass($runningRun ? 'running' : 'info') ?>"><?= Html::escape($statusLabel) ?></span>
