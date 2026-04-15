@@ -2,6 +2,8 @@
 
 class ExpandService
 {
+    private const NULL_SCOPE_KEY = '__NULL_SCOPE__';
+
     private int $insertBatchSize;
 
     public function __construct(
@@ -137,8 +139,17 @@ class ExpandService
         $sourceRows = 0;
         $writtenRows = 0;
         $insertBatches = 0;
-
-        $this->stageDb->exec('TRUNCATE TABLE ' . $this->quoteIdentifier($targetTable));
+        $deletedRows = 0;
+        $targetColumns = [
+            'afs_artikel_id',
+            'sku',
+            'language_code',
+            'sort_order',
+            'attribute_name',
+            'attribute_value',
+            'source_directory',
+        ];
+        $rebuiltRowsByScope = [];
 
         $select = $this->stageDb->query(
             sprintf(
@@ -147,10 +158,11 @@ class ExpandService
                 $this->quoteIdentifier($sourceTable)
             )
         );
-        $batch = [];
 
         while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
             $sourceRows++;
+            $scopeKey = $this->buildScopeKey($row['afs_artikel_id'] ?? null);
+            $rebuiltRowsByScope[$scopeKey] ??= [];
 
             foreach ($slots as $slotIndex => $slot) {
                 $nameField = $slot['name'] ?? null;
@@ -164,7 +176,7 @@ class ExpandService
                     continue;
                 }
 
-                $batch[] = [
+                $rebuiltRowsByScope[$scopeKey][] = [
                     'afs_artikel_id' => $row['afs_artikel_id'] ?? null,
                     'sku' => $row['sku'] ?? null,
                     'language_code' => $row['language_code'] ?? null,
@@ -173,25 +185,31 @@ class ExpandService
                     'attribute_value' => $attributeValue,
                     'source_directory' => $row['source_directory'] ?? null,
                 ];
-
-                if (count($batch) >= $this->insertBatchSize) {
-                    $writtenRows += $this->insertRows($targetTable, $batch);
-                    $insertBatches++;
-                    $batch = [];
-                }
             }
         }
 
-        if ($batch !== []) {
-            $writtenRows += $this->insertRows($targetTable, $batch);
-            $insertBatches++;
-        }
+        $existingRowsByScope = $this->fetchTargetRowsByScope($targetTable, $targetColumns, 'afs_artikel_id');
+        $scopeStats = $this->applyIncrementalRows(
+            $targetTable,
+            'afs_artikel_id',
+            $targetColumns,
+            $rebuiltRowsByScope,
+            $existingRowsByScope
+        );
+
+        $deletedRows = (int) ($scopeStats['deleted_rows'] ?? 0);
+        $writtenRows = (int) ($scopeStats['written_rows'] ?? 0);
+        $insertBatches = (int) ($scopeStats['insert_batches'] ?? 0);
 
         $stats = [
             'mode' => 'attribute_slots',
             'source_table' => $sourceTable,
             'target_table' => $targetTable,
             'source_rows' => $sourceRows,
+            'source_products' => count($rebuiltRowsByScope),
+            'affected_products' => (int) ($scopeStats['affected_scopes'] ?? 0),
+            'unchanged_products' => (int) ($scopeStats['unchanged_scopes'] ?? 0),
+            'deleted_rows' => $deletedRows,
             'written_rows' => $writtenRows,
             'insert_batches' => $insertBatches,
             'duration_seconds' => $this->roundDuration(microtime(true) - $startedAt),
@@ -259,8 +277,19 @@ class ExpandService
         $sourceRows = 0;
         $writtenRows = 0;
         $insertBatches = 0;
-
-        $this->stageDb->exec('TRUNCATE TABLE ' . $this->quoteIdentifier($targetTable));
+        $deletedRows = 0;
+        $targetColumns = [
+            'media_external_id',
+            'afs_artikel_id',
+            'source_slot',
+            'file_name',
+            'path',
+            'type',
+            'document_type',
+            'sort_order',
+            'position',
+        ];
+        $rebuiltRowsByScope = [];
 
         $select = $this->stageDb->query(
             sprintf(
@@ -269,11 +298,12 @@ class ExpandService
                 $this->quoteIdentifier($sourceTable)
             )
         );
-        $batch = [];
 
         while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
             $sourceRows++;
             $afsArtikelId = $row['afs_artikel_id'] ?? null;
+            $scopeKey = $this->buildScopeKey($afsArtikelId);
+            $rebuiltRowsByScope[$scopeKey] ??= [];
 
             foreach ($slots as $slotIndex => $slot) {
                 $sourceField = $slot['source'] ?? null;
@@ -295,7 +325,7 @@ class ExpandService
                 $fileName = $this->extractFileName($path);
                 $position = (int) $sortOrder;
 
-                $batch[] = [
+                $rebuiltRowsByScope[$scopeKey][] = [
                     'media_external_id' => $this->buildMediaExternalId($afsArtikelId, $slotName),
                     'afs_artikel_id' => $afsArtikelId,
                     'source_slot' => $slotName,
@@ -306,25 +336,31 @@ class ExpandService
                     'sort_order' => $position,
                     'position' => $position,
                 ];
-
-                if (count($batch) >= $this->insertBatchSize) {
-                    $writtenRows += $this->insertRows($targetTable, $batch);
-                    $insertBatches++;
-                    $batch = [];
-                }
             }
         }
 
-        if ($batch !== []) {
-            $writtenRows += $this->insertRows($targetTable, $batch);
-            $insertBatches++;
-        }
+        $existingRowsByScope = $this->fetchTargetRowsByScope($targetTable, $targetColumns, 'afs_artikel_id');
+        $scopeStats = $this->applyIncrementalRows(
+            $targetTable,
+            'afs_artikel_id',
+            $targetColumns,
+            $rebuiltRowsByScope,
+            $existingRowsByScope
+        );
+
+        $deletedRows = (int) ($scopeStats['deleted_rows'] ?? 0);
+        $writtenRows = (int) ($scopeStats['written_rows'] ?? 0);
+        $insertBatches = (int) ($scopeStats['insert_batches'] ?? 0);
 
         $stats = [
             'mode' => 'media_slots',
             'source_table' => $sourceTable,
             'target_table' => $targetTable,
             'source_rows' => $sourceRows,
+            'source_products' => count($rebuiltRowsByScope),
+            'affected_products' => (int) ($scopeStats['affected_scopes'] ?? 0),
+            'unchanged_products' => (int) ($scopeStats['unchanged_scopes'] ?? 0),
+            'deleted_rows' => $deletedRows,
             'written_rows' => $writtenRows,
             'insert_batches' => $insertBatches,
             'duration_seconds' => $this->roundDuration(microtime(true) - $startedAt),
@@ -335,6 +371,187 @@ class ExpandService
         }
 
         return $stats;
+    }
+
+    private function applyIncrementalRows(
+        string $targetTable,
+        string $identityField,
+        array $targetColumns,
+        array $rebuiltRowsByScope,
+        array $existingRowsByScope
+    ): array {
+        $allScopeKeys = array_values(array_unique(array_merge(
+            array_keys($rebuiltRowsByScope),
+            array_keys($existingRowsByScope)
+        )));
+        $affectedScopeKeys = [];
+        $unchangedScopes = 0;
+
+        foreach ($allScopeKeys as $scopeKey) {
+            $rebuiltRows = $rebuiltRowsByScope[$scopeKey] ?? [];
+            $existingRows = $existingRowsByScope[$scopeKey] ?? [];
+
+            if ($this->rowsDiffer($rebuiltRows, $existingRows, $targetColumns)) {
+                $affectedScopeKeys[] = $scopeKey;
+                continue;
+            }
+
+            $unchangedScopes++;
+        }
+
+        if ($affectedScopeKeys === []) {
+            return [
+                'affected_scopes' => 0,
+                'unchanged_scopes' => $unchangedScopes,
+                'deleted_rows' => 0,
+                'written_rows' => 0,
+                'insert_batches' => 0,
+            ];
+        }
+
+        $deletedRows = $this->deleteRowsForScopes($targetTable, $identityField, $affectedScopeKeys);
+        $rowsToInsert = $this->rowsForAffectedScopes($rebuiltRowsByScope, $affectedScopeKeys);
+        $writtenRows = 0;
+        $insertBatches = 0;
+
+        foreach (array_chunk($rowsToInsert, $this->insertBatchSize) as $batch) {
+            if ($batch === []) {
+                continue;
+            }
+
+            $writtenRows += $this->insertRows($targetTable, $batch);
+            $insertBatches++;
+        }
+
+        return [
+            'affected_scopes' => count($affectedScopeKeys),
+            'unchanged_scopes' => $unchangedScopes,
+            'deleted_rows' => $deletedRows,
+            'written_rows' => $writtenRows,
+            'insert_batches' => $insertBatches,
+        ];
+    }
+
+    private function fetchTargetRowsByScope(string $table, array $columns, string $identityField): array
+    {
+        $stmt = $this->stageDb->query(
+            sprintf(
+                'SELECT %s FROM %s',
+                $this->buildSelectColumnList($columns),
+                $this->quoteIdentifier($table)
+            )
+        );
+
+        $rowsByScope = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $scopeKey = $this->buildScopeKey($row[$identityField] ?? null);
+            $rowsByScope[$scopeKey] ??= [];
+            $rowsByScope[$scopeKey][] = $row;
+        }
+
+        return $rowsByScope;
+    }
+
+    private function rowsDiffer(array $rebuiltRows, array $existingRows, array $columns): bool
+    {
+        if (count($rebuiltRows) !== count($existingRows)) {
+            return true;
+        }
+
+        $rebuiltSignatures = $this->normalizeRowSet($rebuiltRows, $columns);
+        $existingSignatures = $this->normalizeRowSet($existingRows, $columns);
+
+        return $rebuiltSignatures !== $existingSignatures;
+    }
+
+    private function normalizeRowSet(array $rows, array $columns): array
+    {
+        $signatures = [];
+
+        foreach ($rows as $row) {
+            $normalized = [];
+
+            foreach ($columns as $column) {
+                $value = $row[$column] ?? null;
+                $normalized[$column] = $value === null ? null : trim((string) $value);
+            }
+
+            $signatures[] = json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        }
+
+        sort($signatures);
+
+        return $signatures;
+    }
+
+    private function deleteRowsForScopes(string $table, string $identityField, array $scopeKeys): int
+    {
+        if ($scopeKeys === []) {
+            return 0;
+        }
+
+        $identityValues = [];
+        $hasNullScope = false;
+
+        foreach ($scopeKeys as $scopeKey) {
+            if ($scopeKey === self::NULL_SCOPE_KEY) {
+                $hasNullScope = true;
+                continue;
+            }
+
+            $identityValues[] = $scopeKey;
+        }
+
+        $whereParts = [];
+        $params = [];
+
+        if ($identityValues !== []) {
+            $placeholders = [];
+            foreach ($identityValues as $index => $identityValue) {
+                $placeholder = ':identity_' . $index;
+                $placeholders[] = $placeholder;
+                $params[$placeholder] = $identityValue;
+            }
+
+            $whereParts[] = $this->quoteIdentifier($identityField) . ' IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        if ($hasNullScope) {
+            $whereParts[] = $this->quoteIdentifier($identityField) . ' IS NULL';
+        }
+
+        if ($whereParts === []) {
+            return 0;
+        }
+
+        $stmt = $this->stageDb->prepare(
+            'DELETE FROM ' . $this->quoteIdentifier($table) . ' WHERE ' . implode(' OR ', $whereParts)
+        );
+        $stmt->execute($params);
+
+        return (int) $stmt->rowCount();
+    }
+
+    private function rowsForAffectedScopes(array $rowsByScope, array $scopeKeys): array
+    {
+        $rows = [];
+
+        foreach ($scopeKeys as $scopeKey) {
+            foreach ($rowsByScope[$scopeKey] ?? [] as $row) {
+                $rows[] = $row;
+            }
+        }
+
+        return $rows;
+    }
+
+    private function buildScopeKey(mixed $identityValue): string
+    {
+        if ($identityValue === null || $identityValue === '') {
+            return self::NULL_SCOPE_KEY;
+        }
+
+        return trim((string) $identityValue);
     }
 
     private function normalizeString(mixed $value): ?string
