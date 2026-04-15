@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/XtWriteDependencyMap.php';
+
 final class XtSnapshotService
 {
-    private array $sourceConfig;
+    private array $mirrorDefinitions;
     private int $pageSize;
     private int $writeBatchSize;
     private StageWriter $stageWriter;
@@ -17,10 +19,11 @@ final class XtSnapshotService
         private ?int $runId = null
     ) {
         $snapshotConfig = $config['snapshot'] ?? [];
-        $this->sourceConfig = is_array($snapshotConfig['sources'] ?? null) ? $snapshotConfig['sources'] : [];
         $this->pageSize = max(1, (int) ($snapshotConfig['page_size'] ?? 500));
         $this->writeBatchSize = max(1, (int) ($snapshotConfig['write_batch_size'] ?? 500));
         $this->stageWriter = new StageWriter($this->stageDb);
+        $xtWriteConfig = require dirname(__DIR__, 2) . '/config/xt_write.php';
+        $this->mirrorDefinitions = XtWriteDependencyMap::tableDefinitions($xtWriteConfig);
     }
 
     public function run(): array
@@ -32,17 +35,20 @@ final class XtSnapshotService
         $this->xtApiClient->health();
         $this->log('info', 'XT-API fuer Snapshot-Import erreichbar.');
 
-        $categoriesSource = $this->fetchAll('categories');
-        $productCategoryLinksSource = $this->fetchAll('products_to_categories');
-        $productDescriptionsSource = $this->fetchAll('products_description');
-        $productAttributesSource = $this->fetchAll('product_attributes');
-        $productAttributeDescriptionsSource = $this->fetchAll('product_attribute_descriptions');
-        $productToAttributesSource = $this->fetchAll('products_to_attributes');
-        $seoUrlsSource = $this->fetchAll('seo_urls');
-        $productsSource = $this->fetchAll('products');
-        $mediaSource = $this->fetchAll('media');
-        $mediaLinksSource = $this->fetchAll('media_links');
         $importedAt = date('Y-m-d H:i:s');
+        $mirrorSources = $this->fetchMirrorSources();
+
+        $categoriesSource = $mirrorSources['xt_categories'] ?? ['rows' => [], 'total' => 0];
+        $productCategoryLinksSource = $mirrorSources['xt_products_to_categories'] ?? ['rows' => [], 'total' => 0];
+        $productDescriptionsSource = $mirrorSources['xt_products_description'] ?? ['rows' => [], 'total' => 0];
+        $productAttributesSource = $mirrorSources['xt_plg_products_attributes'] ?? ['rows' => [], 'total' => 0];
+        $productAttributeDescriptionsSource = $mirrorSources['xt_plg_products_attributes_description'] ?? ['rows' => [], 'total' => 0];
+        $productToAttributesSource = $mirrorSources['xt_plg_products_to_attributes'] ?? ['rows' => [], 'total' => 0];
+        $seoUrlsSource = $mirrorSources['xt_seo_url'] ?? ['rows' => [], 'total' => 0];
+        $productsSource = $mirrorSources['xt_products'] ?? ['rows' => [], 'total' => 0];
+        $mediaSource = $mirrorSources['xt_media'] ?? ['rows' => [], 'total' => 0];
+        $mediaLinksSource = $mirrorSources['xt_media_link'] ?? ['rows' => [], 'total' => 0];
+        $mirrorRows = $this->buildMirrorRows($mirrorSources, $importedAt);
 
         [$categorySnapshots, $categoryStats, $categoryExternalById] = $this->buildCategorySnapshots($categoriesSource['rows'], $importedAt);
         $productCategoryMap = $this->buildProductCategoryMap($productCategoryLinksSource['rows'], $categoryExternalById);
@@ -71,8 +77,12 @@ final class XtSnapshotService
         $this->stageDb->beginTransaction();
 
         try {
+            $this->clearMirrorTables();
             $this->clearSnapshotTables();
 
+            foreach ($mirrorRows as $table => $rows) {
+                $this->insertBatches($table, $rows);
+            }
             $this->insertBatches('xt_products_snapshot', $productSnapshots);
             $this->insertBatches('xt_categories_snapshot', $categorySnapshots);
             $this->insertBatches('xt_media_snapshot', $mediaSnapshots);
@@ -92,18 +102,8 @@ final class XtSnapshotService
             'categories' => count($categorySnapshots),
             'media' => count($mediaSnapshots),
             'documents' => count($documentSnapshots),
-            'source_counts' => [
-                'xt_products' => $productsSource['total'],
-                'xt_categories' => $categoriesSource['total'],
-                'xt_products_to_categories' => $productCategoryLinksSource['total'],
-                'xt_products_description' => $productDescriptionsSource['total'],
-                'xt_media' => $mediaSource['total'],
-                'xt_media_link' => $mediaLinksSource['total'],
-                'xt_plg_products_attributes' => $productAttributesSource['total'],
-                'xt_plg_products_attributes_description' => $productAttributeDescriptionsSource['total'],
-                'xt_plg_products_to_attributes' => $productToAttributesSource['total'],
-                'xt_seo_url' => $seoUrlsSource['total'],
-            ],
+            'source_counts' => $this->sourceCounts($mirrorSources),
+            'mirror_counts' => array_map(static fn (array $rows): int => count($rows), $mirrorRows),
             'skipped' => [
                 'products_without_external_id' => $productStats['without_external_id'],
                 'categories_without_external_id' => $categoryStats['without_external_id'],
@@ -120,6 +120,18 @@ final class XtSnapshotService
         return $stats;
     }
 
+    private function clearMirrorTables(): void
+    {
+        foreach ($this->mirrorDefinitions as $definition) {
+            $table = (string) ($definition['mirror_table'] ?? '');
+            if ($table === '') {
+                continue;
+            }
+
+            $this->stageDb->exec("DELETE FROM `{$table}`");
+        }
+    }
+
     private function clearSnapshotTables(): void
     {
         foreach ([
@@ -132,20 +144,30 @@ final class XtSnapshotService
         }
     }
 
-    private function fetchAll(string $key): array
+    private function fetchMirrorSources(): array
     {
-        $source = $this->sourceConfig[$key] ?? null;
-        if (!is_array($source)) {
-            throw new RuntimeException("XT-Snapshot-Quelle '{$key}' ist nicht konfiguriert.");
+        $sources = [];
+
+        foreach ($this->mirrorDefinitions as $table => $definition) {
+            $sources[$table] = $this->fetchTable(
+                $table,
+                array_values(array_unique(array_merge(
+                    is_array($definition['fields'] ?? null) ? $definition['fields'] : [],
+                    $this->supplementalReadFields($table)
+                )))
+            );
         }
 
-        $table = (string) ($source['table'] ?? '');
-        $fields = $source['fields'] ?? [];
+        return $sources;
+    }
 
-        if ($table === '' || !is_array($fields) || $fields === []) {
-            throw new RuntimeException("XT-Snapshot-Quelle '{$key}' ist unvollstaendig konfiguriert.");
+    private function fetchTable(string $table, array $fields): array
+    {
+        if ($table === '' || $fields === []) {
+            throw new RuntimeException("XT-Snapshot-Quelle fuer Tabelle '{$table}' ist unvollstaendig.");
         }
 
+        $fields = array_values(array_unique(array_filter($fields, static fn (mixed $field): bool => is_string($field) && $field !== '')));
         $rows = [];
         $offset = 0;
         $total = 0;
@@ -170,8 +192,8 @@ final class XtSnapshotService
         } while (true);
 
         $this->log('info', 'XT-Snapshot-Quelle geladen.', [
-            'source' => $key,
             'table' => $table,
+            'fields' => $fields,
             'rows' => count($rows),
             'total' => $total,
         ]);
@@ -180,6 +202,62 @@ final class XtSnapshotService
             'rows' => $rows,
             'total' => $total > 0 ? $total : count($rows),
         ];
+    }
+
+    private function buildMirrorRows(array $sources, string $importedAt): array
+    {
+        $mirrorRows = [];
+
+        foreach ($this->mirrorDefinitions as $table => $definition) {
+            $mirrorTable = (string) ($definition['mirror_table'] ?? '');
+            $fields = is_array($definition['fields'] ?? null) ? $definition['fields'] : [];
+            $rows = is_array($sources[$table]['rows'] ?? null) ? $sources[$table]['rows'] : [];
+
+            if ($mirrorTable === '' || $fields === []) {
+                continue;
+            }
+
+            $mirrorRows[$mirrorTable] = [];
+
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $mirrorRow = [];
+                foreach ($fields as $field) {
+                    $mirrorRow[$field] = $row[$field] ?? null;
+                }
+
+                $mirrorRow['imported_at'] = $importedAt;
+                $mirrorRow['snapshot_hash'] = $this->hashSnapshot($mirrorRow, ['snapshot_hash', 'imported_at']);
+                $mirrorRows[$mirrorTable][] = $mirrorRow;
+            }
+        }
+
+        return $mirrorRows;
+    }
+
+    private function sourceCounts(array $sources): array
+    {
+        $counts = [];
+
+        foreach ($sources as $table => $source) {
+            $counts[$table] = (int) ($source['total'] ?? 0);
+        }
+
+        ksort($counts);
+
+        return $counts;
+    }
+
+    private function supplementalReadFields(string $table): array
+    {
+        return match ($table) {
+            'xt_products' => ['products_image'],
+            'xt_media_link' => ['ml_id'],
+            default => [],
+        };
     }
 
     private function buildProductSnapshots(

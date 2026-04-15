@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once dirname(__DIR__) . '/src/Service/XtWriteDependencyMap.php';
+
 $configFile = __DIR__ . '/config.php';
 
 if (!is_file($configFile)) {
@@ -460,7 +462,7 @@ function wela_is_valid_timestamp(mixed $timestamp): bool
 
 function wela_allowed_tables(): array
 {
-    return [
+    $tables = [
         'xt_products' => [
             'primary_key' => 'products_id',
             'read_fields' => [
@@ -545,6 +547,27 @@ function wela_allowed_tables(): array
             ],
         ],
     ];
+
+    $xtWriteConfig = require dirname(__DIR__) . '/config/xt_write.php';
+
+    foreach (XtWriteDependencyMap::tableDefinitions($xtWriteConfig) as $table => $definition) {
+        $tables[$table] ??= [
+            'primary_key' => $definition['primary_key'],
+            'read_fields' => [],
+            'write_fields' => [],
+        ];
+
+        if (($tables[$table]['primary_key'] ?? null) === [] || ($tables[$table]['primary_key'] ?? null) === null) {
+            $tables[$table]['primary_key'] = $definition['primary_key'];
+        }
+
+        $tables[$table]['read_fields'] = array_values(array_unique(array_merge(
+            is_array($tables[$table]['read_fields'] ?? null) ? $tables[$table]['read_fields'] : [],
+            is_array($definition['fields'] ?? null) ? $definition['fields'] : []
+        )));
+    }
+
+    return $tables;
 }
 
 function wela_allowed_table(mixed $table, array $allowedTables): string

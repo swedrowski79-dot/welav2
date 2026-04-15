@@ -155,6 +155,20 @@ final class MigrationRepository
                 && $this->columnExists('xt_products_snapshot', 'seo_hash');
         }
 
+        if ($version === '014_create_xt_mirror_tables') {
+            return $this->tableExists('xt_mirror_products')
+                && $this->tableExists('xt_mirror_categories')
+                && $this->tableExists('xt_mirror_categories_description')
+                && $this->tableExists('xt_mirror_products_description')
+                && $this->tableExists('xt_mirror_products_to_categories')
+                && $this->tableExists('xt_mirror_media')
+                && $this->tableExists('xt_mirror_media_link')
+                && $this->tableExists('xt_mirror_plg_products_attributes')
+                && $this->tableExists('xt_mirror_plg_products_attributes_description')
+                && $this->tableExists('xt_mirror_plg_products_to_attributes')
+                && $this->tableExists('xt_mirror_seo_url');
+        }
+
         return false;
     }
 
