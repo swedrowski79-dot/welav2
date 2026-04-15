@@ -1,5 +1,12 @@
 <?php use App\Web\Core\Html; ?>
 
+<?php
+$runContext = json_decode((string) ($run['context_json'] ?? '{}'), true);
+if (!is_array($runContext)) {
+    $runContext = [];
+}
+?>
+
 <?php if ($run === null): ?>
     <div class="panel-card p-4"><div class="text-secondary">Der Lauf konnte nicht geladen werden.</div></div>
 <?php else: ?>
@@ -11,6 +18,10 @@
                     <div class="col-6 col-md-3"><div class="text-secondary small">Importiert</div><div class="fw-semibold"><?= Html::escape($run['imported_records'] ?? 0) ?></div></div>
                     <div class="col-6 col-md-3"><div class="text-secondary small">Gemergt</div><div class="fw-semibold"><?= Html::escape($run['merged_records'] ?? 0) ?></div></div>
                     <div class="col-6 col-md-3"><div class="text-secondary small">Fehler</div><div class="fw-semibold"><?= Html::escape($run['error_count'] ?? 0) ?></div></div>
+                    <?php if (($run['run_type'] ?? '') === 'export_queue_worker'): ?>
+                        <div class="col-6 col-md-3"><div class="text-secondary small">Retries</div><div class="fw-semibold"><?= Html::escape($runContext['retried'] ?? 0) ?></div></div>
+                        <div class="col-6 col-md-3"><div class="text-secondary small">Terminale Fehler</div><div class="fw-semibold"><?= Html::escape($runContext['permanent_error'] ?? 0) ?></div></div>
+                    <?php endif; ?>
                 </div>
                 <hr>
                 <dl class="row mb-0">

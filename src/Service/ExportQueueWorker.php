@@ -46,6 +46,7 @@ final class ExportQueueWorker
             'done' => 0,
             'retried' => 0,
             'permanent_error' => 0,
+            'issue' => 0,
             'error' => 0,
             'entities' => [],
         ];
@@ -55,7 +56,7 @@ final class ExportQueueWorker
             $entityStats = $this->runCurrentEntity($limit);
             $aggregate['entities'][$this->entityType] = $entityStats;
 
-            foreach (['claimed', 'processed', 'done', 'retried', 'permanent_error', 'error'] as $field) {
+            foreach (['claimed', 'processed', 'done', 'retried', 'permanent_error', 'issue', 'error'] as $field) {
                 $aggregate[$field] += (int) ($entityStats[$field] ?? 0);
             }
         }
@@ -104,6 +105,7 @@ final class ExportQueueWorker
             'done' => 0,
             'retried' => 0,
             'permanent_error' => 0,
+            'issue' => 0,
             'error' => 0,
             'entity_type' => $this->entityType,
             'config_key' => $this->configKey,
@@ -146,7 +148,11 @@ final class ExportQueueWorker
 
                 $result = $this->handleFailureSafely($entry, $exception);
                 $stats[$result]++;
-                $stats['error']++;
+                $stats['issue']++;
+
+                if ($result === 'permanent_error') {
+                    $stats['error']++;
+                }
             }
         }
 
