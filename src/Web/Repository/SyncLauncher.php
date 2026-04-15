@@ -14,7 +14,7 @@ final class SyncLauncher
         'expand' => 'php /app/run_expand.php',
         'delta' => 'php /app/run_delta.php',
         'export_queue_worker' => 'php /app/run_export_queue.php',
-        'full_pipeline' => 'php /app/run_import_all.php && php /app/run_merge.php && php /app/run_expand.php && php /app/run_export_queue.php',
+        'full_pipeline' => 'php /app/run_full_pipeline.php',
     ];
 
     public function launch(string $job): void
