@@ -259,6 +259,51 @@ final class MonitoringRepository
         );
     }
 
+    public function latestRunByTypes(array $runTypes): ?array
+    {
+        $runTypes = array_values(array_filter(
+            $runTypes,
+            static fn (mixed $value): bool => is_string($value) && $value !== ''
+        ));
+
+        if ($runTypes === []) {
+            return null;
+        }
+
+        $placeholders = [];
+        $params = [];
+
+        foreach ($runTypes as $index => $runType) {
+            $placeholder = ':run_type_' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = $runType;
+        }
+
+        try {
+            $stmt = $this->stageDb->prepare(
+                sprintf(
+                    'SELECT *,
+                            TIMESTAMPDIFF(SECOND, started_at, COALESCE(ended_at, UTC_TIMESTAMP())) AS duration_seconds
+                     FROM sync_runs
+                     WHERE run_type IN (%s)
+                     ORDER BY started_at DESC
+                     LIMIT 1',
+                    implode(', ', $placeholders)
+                )
+            );
+            $stmt->execute($params);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            return $row ?: null;
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return null;
+            }
+
+            throw $exception;
+        }
+    }
+
     public function latestPipelineError(): ?array
     {
         return $this->fetchOne('SELECT * FROM sync_errors ORDER BY created_at DESC LIMIT 1');

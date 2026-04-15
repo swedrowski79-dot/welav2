@@ -73,6 +73,45 @@ final class PipelineAdminRepository
         ];
     }
 
+    public function queueSummaryByEntity(): array
+    {
+        try {
+            $stmt = $this->stageDb->query(
+                "SELECT entity_type, status, COUNT(*) AS item_count
+                 FROM export_queue
+                 GROUP BY entity_type, status
+                 ORDER BY entity_type ASC, status ASC"
+            );
+
+            $summary = [];
+
+            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                $entityType = (string) ($row['entity_type'] ?? 'unknown');
+                $status = (string) ($row['status'] ?? 'unknown');
+                $summary[$entityType] ??= [
+                    'pending' => 0,
+                    'processing' => 0,
+                    'done' => 0,
+                    'error' => 0,
+                ];
+
+                if (!array_key_exists($status, $summary[$entityType])) {
+                    continue;
+                }
+
+                $summary[$entityType][$status] = (int) ($row['item_count'] ?? 0);
+            }
+
+            return $summary;
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return [];
+            }
+
+            throw $exception;
+        }
+    }
+
     public function stateSummary(): array
     {
         return [

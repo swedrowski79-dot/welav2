@@ -40,6 +40,8 @@ final class PipelineController extends Controller
         $recentLogs = $monitoringRepository->recentPipelineLogs((int) ($latestRun['id'] ?? 0), 10);
         $progressLogs = array_slice($recentLogs, 0, 5);
         $progressSummary = $this->progressSummary($focusRun, $latestRun, $activeLog, $progressLogs);
+        $latestDeltaRun = $monitoringRepository->latestRunByTypes(['delta', 'expand']);
+        $latestWorkerRun = $monitoringRepository->latestRunByTypes(['export_queue_worker']);
 
         return $this->render('pipeline/index', [
             'pageTitle' => 'Pipeline & Export Queue',
@@ -48,6 +50,7 @@ final class PipelineController extends Controller
             'paginator' => $paginator,
             'queueEntries' => $repository->paginatedQueueEntries($filters, $paginator),
             'queueSummary' => $repository->queueSummary(),
+            'queueSummaryByEntity' => $repository->queueSummaryByEntity(),
             'stateSummary' => $repository->stateSummary(),
             'schemaIssues' => $schemaHealth->issues($stageDb),
             'consistencyReport' => $consistencyRepository->report($stageDb),
@@ -60,6 +63,8 @@ final class PipelineController extends Controller
             'runLogCount' => $monitoringRepository->countLogsForRun((int) ($latestRun['id'] ?? 0)),
             'latestError' => $monitoringRepository->latestPipelineError(),
             'recentLogs' => $recentLogs,
+            'latestDeltaVisibility' => $this->deltaVisibility($latestDeltaRun),
+            'latestWorkerVisibility' => $this->workerVisibility($latestWorkerRun),
             'started' => $request->query('started') === '1',
             'migrationsDone' => $request->int('migrations_done'),
             'resetDone' => $request->string('reset_done'),
@@ -162,6 +167,79 @@ final class PipelineController extends Controller
             'refresh_hint' => $isRunning ? 'Seite aktualisiert sich automatisch alle 10 Sekunden waehrend des aktiven Laufs.' : null,
             'last_update' => (string) (($activeLog['created_at'] ?? null) ?: ($run['started_at'] ?? '-')),
         ];
+    }
+
+    private function deltaVisibility(?array $run): ?array
+    {
+        if ($run === null) {
+            return null;
+        }
+
+        $context = json_decode((string) ($run['context_json'] ?? '{}'), true);
+        if (!is_array($context)) {
+            $context = [];
+        }
+
+        $delta = ($run['run_type'] ?? '') === 'expand' && isset($context['delta']) && is_array($context['delta'])
+            ? $context['delta']
+            : $context;
+
+        $reason = match ((string) ($delta['result_reason'] ?? '')) {
+            'queue_entries_created' => 'Delta hat neue Queue-Eintraege geschrieben.',
+            'existing_pending_or_processing_entries' => 'Delta hat keine neuen Queue-Eintraege geschrieben, weil bereits aktive pending/processing-Eintraege existierten.',
+            'errors_detected' => 'Delta hat Fehler protokolliert.',
+            default => 'Delta hat keine Aenderungen erkannt.',
+        };
+
+        return [
+            'run' => $run,
+            'context' => $delta,
+            'reason' => $reason,
+        ];
+    }
+
+    private function workerVisibility(?array $run): ?array
+    {
+        if ($run === null) {
+            return null;
+        }
+
+        $context = json_decode((string) ($run['context_json'] ?? '{}'), true);
+        if (!is_array($context)) {
+            $context = [];
+        }
+
+        $reason = 'Export Queue Worker hat Eintraege verarbeitet.';
+        if ((int) ($context['processed'] ?? 0) === 0) {
+            $reason = match ((string) ($this->firstNoWorkReason($context['entities'] ?? []) ?? '')) {
+                'pending_items_waiting_for_available_at' => 'Es gab pending Queue-Eintraege, aber sie waren noch nicht ueber available_at freigegeben.',
+                'items_already_processing' => 'Es gab keine claimbaren pending Eintraege, weil Eintraege bereits verarbeitet wurden.',
+                'claim_conflict_or_concurrent_processing' => 'Es gab claimbare Eintraege, aber sie wurden parallel nicht mehr von diesem Worker geclaimt.',
+                default => 'Es gab keine claimbaren pending Queue-Eintraege.',
+            };
+        }
+
+        return [
+            'run' => $run,
+            'context' => $context,
+            'reason' => $reason,
+        ];
+    }
+
+    private function firstNoWorkReason(array $entities): ?string
+    {
+        foreach ($entities as $entityStats) {
+            if (!is_array($entityStats)) {
+                continue;
+            }
+
+            $reason = $entityStats['no_work_reason'] ?? null;
+            if (is_string($reason) && $reason !== '') {
+                return $reason;
+            }
+        }
+
+        return null;
     }
 
     private function humanizeRunType(string $runType): string

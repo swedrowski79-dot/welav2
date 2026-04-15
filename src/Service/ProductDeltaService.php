@@ -48,6 +48,7 @@ class ProductDeltaService
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
         $states = $this->fetchStates();
+        $initialQueueCounts = $this->fetchQueueCounts();
         $this->pendingQueueEntities = $this->fetchExistingQueueEntities();
         $this->queuedEntries = [];
 
@@ -160,9 +161,16 @@ class ProductDeltaService
         }
 
         $this->flushQueuedEntries();
+        $finalQueueCounts = $this->fetchQueueCounts();
         $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['removed'];
         $stats['entity_type'] = $this->entityType;
         $stats['config_key'] = $this->configKey;
+        $stats['pending_before'] = (int) ($initialQueueCounts['pending'] ?? 0);
+        $stats['processing_before'] = (int) ($initialQueueCounts['processing'] ?? 0);
+        $stats['pending_after'] = (int) ($finalQueueCounts['pending'] ?? 0);
+        $stats['processing_after'] = (int) ($finalQueueCounts['processing'] ?? 0);
+        $stats['queue_created'] = $stats['changed'];
+        $stats['result_reason'] = $this->deltaResultReason($stats);
 
         if ($this->monitor !== null) {
             $this->monitor->log($this->runId, 'info', "{$this->entityLabel}-Delta berechnet.", [
@@ -174,6 +182,23 @@ class ProductDeltaService
                 'removed' => $stats['removed'],
                 'deduplicated' => $stats['deduplicated'],
                 'errors' => $stats['errors'],
+                'pending_before' => $stats['pending_before'],
+                'processing_before' => $stats['processing_before'],
+                'pending_after' => $stats['pending_after'],
+                'processing_after' => $stats['processing_after'],
+                'queue_created' => $stats['queue_created'],
+                'result_reason' => $stats['result_reason'],
+            ]);
+
+            $this->monitor->log($this->runId, 'info', "{$this->entityLabel}-Queue-Sichtbarkeit aktualisiert.", [
+                'entity_type' => $this->entityType,
+                'queue_created' => $stats['queue_created'],
+                'pending_before' => $stats['pending_before'],
+                'processing_before' => $stats['processing_before'],
+                'pending_after' => $stats['pending_after'],
+                'processing_after' => $stats['processing_after'],
+                'deduplicated' => $stats['deduplicated'],
+                'result_reason' => $stats['result_reason'],
             ]);
         }
 
@@ -408,6 +433,54 @@ class ProductDeltaService
         }
 
         return $entities;
+    }
+
+    private function fetchQueueCounts(): array
+    {
+        $stmt = $this->stageDb->prepare(
+            "SELECT status, COUNT(*) AS item_count
+             FROM `{$this->queueTable}`
+             WHERE entity_type = :entity_type
+             GROUP BY status"
+        );
+        $stmt->execute([
+            ':entity_type' => $this->entityType,
+        ]);
+
+        $counts = [
+            'pending' => 0,
+            'processing' => 0,
+            'done' => 0,
+            'error' => 0,
+        ];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $status = (string) ($row['status'] ?? '');
+            if (!array_key_exists($status, $counts)) {
+                continue;
+            }
+
+            $counts[$status] = (int) ($row['item_count'] ?? 0);
+        }
+
+        return $counts;
+    }
+
+    private function deltaResultReason(array $stats): string
+    {
+        if ((int) ($stats['errors'] ?? 0) > 0) {
+            return 'errors_detected';
+        }
+
+        if ((int) ($stats['queue_created'] ?? 0) > 0) {
+            return 'queue_entries_created';
+        }
+
+        if ((int) ($stats['deduplicated'] ?? 0) > 0) {
+            return 'existing_pending_or_processing_entries';
+        }
+
+        return 'no_changes_detected';
     }
 
     private function scheduleQueueEntry(string $entityId, string $action, array $payload): bool

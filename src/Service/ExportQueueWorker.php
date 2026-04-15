@@ -88,6 +88,15 @@ final class ExportQueueWorker
 
     private function runCurrentEntity(?int $limit = null): array
     {
+        $queueSnapshot = $this->queueAvailabilitySnapshot();
+
+        if ($this->monitor !== null) {
+            $this->monitor->log($this->runId, 'info', 'Export Queue Status vor Worker-Claim ermittelt.', [
+                'entity_type' => $this->entityType,
+                ...$queueSnapshot,
+            ]);
+        }
+
         $entries = $this->claimPendingEntries($limit ?? $this->workerBatchSize);
         $stats = [
             'claimed' => count($entries),
@@ -98,7 +107,26 @@ final class ExportQueueWorker
             'error' => 0,
             'entity_type' => $this->entityType,
             'config_key' => $this->configKey,
+            'pending_before' => $queueSnapshot['pending_total'],
+            'pending_ready_before' => $queueSnapshot['pending_ready'],
+            'pending_delayed_before' => $queueSnapshot['pending_delayed'],
+            'processing_before' => $queueSnapshot['processing_total'],
+            'no_work_reason' => null,
         ];
+
+        if ($entries === []) {
+            $stats['no_work_reason'] = $this->noWorkReason($queueSnapshot);
+
+            if ($this->monitor !== null) {
+                $this->monitor->log($this->runId, 'info', 'Export Queue Worker fand keine claimbaren Eintraege.', [
+                    'entity_type' => $this->entityType,
+                    'reason' => $stats['no_work_reason'],
+                    ...$queueSnapshot,
+                ]);
+            }
+
+            return $stats;
+        }
 
         foreach ($entries as $entry) {
             $queueId = (int) ($entry['id'] ?? 0);
@@ -235,6 +263,52 @@ final class ExportQueueWorker
         ]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function queueAvailabilitySnapshot(): array
+    {
+        $stmt = $this->stageDb->prepare(
+            "SELECT
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_total,
+                SUM(CASE WHEN status = 'pending' AND (available_at IS NULL OR available_at <= NOW()) THEN 1 ELSE 0 END) AS pending_ready,
+                SUM(CASE WHEN status = 'pending' AND available_at IS NOT NULL AND available_at > NOW() THEN 1 ELSE 0 END) AS pending_delayed,
+                SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing_total
+             FROM `{$this->queueTable}`
+             WHERE entity_type = :entity_type"
+        );
+        $stmt->execute([
+            ':entity_type' => $this->entityType,
+        ]);
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'pending_total' => (int) ($row['pending_total'] ?? 0),
+            'pending_ready' => (int) ($row['pending_ready'] ?? 0),
+            'pending_delayed' => (int) ($row['pending_delayed'] ?? 0),
+            'processing_total' => (int) ($row['processing_total'] ?? 0),
+        ];
+    }
+
+    private function noWorkReason(array $snapshot): string
+    {
+        if ((int) ($snapshot['pending_ready'] ?? 0) > 0) {
+            return 'claim_conflict_or_concurrent_processing';
+        }
+
+        if ((int) ($snapshot['pending_delayed'] ?? 0) > 0) {
+            return 'pending_items_waiting_for_available_at';
+        }
+
+        if ((int) ($snapshot['pending_total'] ?? 0) > 0) {
+            return 'pending_items_not_claimable';
+        }
+
+        if ((int) ($snapshot['processing_total'] ?? 0) > 0) {
+            return 'items_already_processing';
+        }
+
+        return 'no_pending_queue_items';
     }
 
     private function processEntry(array $entry): void

@@ -158,6 +158,130 @@
     </div>
 </div>
 
+<div class="row g-4 mb-4">
+    <div class="col-12 col-xl-6">
+        <div class="panel-card p-4 h-100">
+            <h2 class="h5 mb-1">Delta-Sichtbarkeit</h2>
+            <div class="small text-secondary mb-3">Zeigt, ob Delta neue Queue-Eintraege geschrieben hat oder ob keine Aenderungen bzw. nur bereits aktive Queue-Eintraege vorlagen.</div>
+            <?php if (!empty($latestDeltaVisibility)): ?>
+                <?php $delta = $latestDeltaVisibility['context'] ?? []; ?>
+                <div class="fw-semibold mb-2"><?= Html::escape($latestDeltaVisibility['reason'] ?? '-') ?></div>
+                <div class="small text-secondary mb-3">
+                    Letzter Lauf: <?= Html::escape($latestDeltaVisibility['run']['run_type'] ?? '-') ?>
+                    · Status <?= Html::escape($latestDeltaVisibility['run']['status'] ?? '-') ?>
+                    · Ende <?= Html::escape($latestDeltaVisibility['run']['ended_at'] ?? '-') ?>
+                </div>
+                <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Neu geschrieben</div>
+                            <div class="fw-semibold"><?= Html::escape($delta['queue_created'] ?? $delta['changed'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Unveraendert</div>
+                            <div class="fw-semibold"><?= Html::escape($delta['unchanged'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Dedupliziert</div>
+                            <div class="fw-semibold"><?= Html::escape($delta['deduplicated'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Fehler</div>
+                            <div class="fw-semibold"><?= Html::escape($delta['errors'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Pending vorher</div>
+                            <div class="fw-semibold"><?= Html::escape($delta['pending_before'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Pending nachher</div>
+                            <div class="fw-semibold"><?= Html::escape($delta['pending_after'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="text-secondary small">Noch kein Delta-Lauf vorhanden.</div>
+            <?php endif; ?>
+        </div>
+    </div>
+    <div class="col-12 col-xl-6">
+        <div class="panel-card p-4 h-100">
+            <h2 class="h5 mb-1">Worker-Sichtbarkeit</h2>
+            <div class="small text-secondary mb-3">Zeigt, ob claimbare pending Queue-Eintraege vorhanden waren und warum der Worker gegebenenfalls `0` Eintraege verarbeitet hat.</div>
+            <?php if (!empty($latestWorkerVisibility)): ?>
+                <?php $worker = $latestWorkerVisibility['context'] ?? []; ?>
+                <div class="fw-semibold mb-2"><?= Html::escape($latestWorkerVisibility['reason'] ?? '-') ?></div>
+                <div class="small text-secondary mb-3">
+                    Letzter Lauf: <?= Html::escape($latestWorkerVisibility['run']['run_type'] ?? '-') ?>
+                    · Status <?= Html::escape($latestWorkerVisibility['run']['status'] ?? '-') ?>
+                    · Ende <?= Html::escape($latestWorkerVisibility['run']['ended_at'] ?? '-') ?>
+                </div>
+                <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Claimed</div>
+                            <div class="fw-semibold"><?= Html::escape($worker['claimed'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Processed</div>
+                            <div class="fw-semibold"><?= Html::escape($worker['processed'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Done</div>
+                            <div class="fw-semibold"><?= Html::escape($worker['done'] ?? 0) ?></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded-4 p-3 bg-light-subtle">
+                            <div class="small text-secondary">Retry/Error</div>
+                            <div class="fw-semibold"><?= Html::escape(($worker['retried'] ?? 0) . ' / ' . ($worker['error'] ?? 0)) ?></div>
+                        </div>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="text-secondary small">Noch kein Export-Worker-Lauf vorhanden.</div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<?php if (!empty($queueSummaryByEntity)): ?>
+    <div class="panel-card p-4 mb-4">
+        <h2 class="h5 mb-1">Queue nach Entity-Typ</h2>
+        <div class="small text-secondary mb-3">Schneller Ueberblick, ob Delta fuer Produkte, Medien oder Dokumente pending Eintraege erzeugt hat und wie weit der Worker je Entity-Typ gekommen ist.</div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead><tr><th>Entity</th><th>Pending</th><th>Processing</th><th>Done</th><th>Error</th></tr></thead>
+                <tbody>
+                <?php foreach ($queueSummaryByEntity as $entityType => $summary): ?>
+                    <tr>
+                        <td class="fw-semibold"><?= Html::escape($entityType) ?></td>
+                        <td><?= Html::escape($summary['pending'] ?? 0) ?></td>
+                        <td><?= Html::escape($summary['processing'] ?? 0) ?></td>
+                        <td><?= Html::escape($summary['done'] ?? 0) ?></td>
+                        <td><?= Html::escape($summary['error'] ?? 0) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+<?php endif; ?>
+
 <div class="panel-card p-4 mb-4">
     <div class="row g-3">
         <div class="col-12 col-lg-8">
@@ -359,6 +483,8 @@
             <select class="form-select" name="entity_type">
                 <option value="">Alle</option>
                 <option value="product" <?= $filters['entity_type'] === 'product' ? 'selected' : '' ?>>product</option>
+                <option value="media" <?= $filters['entity_type'] === 'media' ? 'selected' : '' ?>>media</option>
+                <option value="document" <?= $filters['entity_type'] === 'document' ? 'selected' : '' ?>>document</option>
             </select>
         </div>
         <div class="col-12 col-md-3">
