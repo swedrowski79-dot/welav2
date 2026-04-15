@@ -32,7 +32,7 @@ X-Wela-Signature: <hmac-sha256 ueber "<timestamp>.<body>">
 - `delete_rows`
 - `sync_product`
 
-`sync_product` schreibt jetzt optional auch Produkt-SEO-URLs in `xt_seo_url`, aber nur wenn fuer das XT-Produkt noch keine SEO-Zeilen existieren. Bestehende SEO-URLs werden dabei nicht ueberschrieben.
+`sync_product` schreibt jetzt optional auch Produkt-SEO-URLs in `xt_seo_url`. Bestehende SEO-Zeilen behalten dabei `url_text` und `url_md5`, waehrend `meta_title`, `meta_description` und `meta_keywords` weiter aktualisiert werden. Fehlende SEO-Zeilen werden weiterhin vollstaendig angelegt.
 
 `fetch_rows` liefert paginierte Read-only-Zeilen aus freigegebenen XT-Tabellen und wird fuer den XT-Snapshot-Import verwendet.
 

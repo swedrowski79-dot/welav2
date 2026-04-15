@@ -359,33 +359,34 @@ try {
 
                 $seoWrites = 0;
 
-                if ($seoUrls !== [] && !wela_seo_rows_exist($pdo, 1, $productId)) {
-                    foreach ($seoUrls as $seoUrl) {
-                        $languageCode = wela_allowed_language($seoUrl['language_code'] ?? null);
-                        $seoColumns = wela_allowed_field_map(
-                            wela_required_array($seoUrl['columns'] ?? null, 'Produkt-Sync-SEO benoetigt Spalten.'),
-                            wela_allowed_tables()['xt_seo_url']['write_fields']
-                        );
+                foreach ($seoUrls as $seoUrl) {
+                    $languageCode = wela_allowed_language($seoUrl['language_code'] ?? null);
+                    $seoColumns = wela_allowed_field_map(
+                        wela_required_array($seoUrl['columns'] ?? null, 'Produkt-Sync-SEO benoetigt Spalten.'),
+                        wela_allowed_tables()['xt_seo_url']['write_fields']
+                    );
 
-                        $linkType = isset($seoColumns['link_type']) ? (int) $seoColumns['link_type'] : 1;
-                        $storeId = isset($seoColumns['store_id']) ? (int) $seoColumns['store_id'] : 1;
+                    $linkType = isset($seoColumns['link_type']) ? (int) $seoColumns['link_type'] : 1;
+                    $storeId = isset($seoColumns['store_id']) ? (int) $seoColumns['store_id'] : 1;
+                    $seoIdentity = [
+                        'link_type' => $linkType,
+                        'link_id' => $productId,
+                        'language_code' => $languageCode,
+                        'store_id' => $storeId,
+                    ];
 
-                        unset($seoColumns['link_id'], $seoColumns['link_type'], $seoColumns['language_code'], $seoColumns['store_id']);
+                    unset($seoColumns['link_id'], $seoColumns['link_type'], $seoColumns['language_code'], $seoColumns['store_id']);
 
-                        wela_upsert_row(
-                            $pdo,
-                            'xt_seo_url',
-                            ['link_type', 'link_id', 'language_code', 'store_id'],
-                            [
-                                'link_type' => $linkType,
-                                'link_id' => $productId,
-                                'language_code' => $languageCode,
-                                'store_id' => $storeId,
-                            ],
-                            $seoColumns
-                        );
-                        $seoWrites++;
-                    }
+                    $seoColumns = wela_preserve_existing_seo_url_columns($pdo, $seoIdentity, $seoColumns);
+
+                    wela_upsert_row(
+                        $pdo,
+                        'xt_seo_url',
+                        ['link_type', 'link_id', 'language_code', 'store_id'],
+                        $seoIdentity,
+                        $seoColumns
+                    );
+                    $seoWrites++;
                 }
 
                 $pdo->commit();
@@ -759,17 +760,23 @@ function wela_delete_rows(PDO $pdo, string $table, array $where): int
     return $stmt->rowCount();
 }
 
-function wela_seo_rows_exist(PDO $pdo, int $linkType, int $linkId): bool
+function wela_preserve_existing_seo_url_columns(PDO $pdo, array $identity, array $columns): array
 {
     $stmt = $pdo->prepare(
-        'SELECT 1 FROM `xt_seo_url` WHERE `link_type` = :link_type AND `link_id` = :link_id LIMIT 1'
+        sprintf(
+            'SELECT 1 FROM `xt_seo_url` WHERE %s LIMIT 1',
+            wela_where_clause($identity)
+        )
     );
-    $stmt->execute([
-        ':link_type' => $linkType,
-        ':link_id' => $linkId,
-    ]);
+    $stmt->execute(wela_sql_params($identity));
 
-    return (bool) $stmt->fetchColumn();
+    if (!$stmt->fetchColumn()) {
+        return $columns;
+    }
+
+    unset($columns['url_text'], $columns['url_md5']);
+
+    return $columns;
 }
 
 function wela_where_clause(array $values, string $prefix = ''): string

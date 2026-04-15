@@ -84,4 +84,4 @@ AFS bleibt die sprachneutrale Stammquelle und dient nur noch als Fallback, wenn 
 Update v3:
 - manufacturer entfernt, da nicht in den Übersetzungsquellen vorhanden.
 - seo_slug entfernt, da nicht in den Übersetzungsquellen vorhanden.
-- SEO-URLs werden ausschließlich generiert, wenn in XT noch keine URL existiert; bestehende url_text/url_md5 bleiben unverändert.
+- SEO-URLs werden pro XT-SEO-Zeile behandelt: bestehende `url_text`/`url_md5` bleiben unverändert, fehlende Zeilen werden weiterhin vollständig erzeugt, und Metadaten dürfen aktualisiert werden.
