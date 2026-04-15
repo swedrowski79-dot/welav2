@@ -75,4 +75,4 @@ Reduce expand runtime by replacing full-table rebuild behavior with product-scop
 
 ## Result
 
-Completed locally. Commit created as part of the ticket workflow; push remains intentionally pending until explicitly requested.
+Completed locally in commit `24192d4` (`Implement T-034 incremental expand`). Push remains intentionally pending until explicitly requested.
