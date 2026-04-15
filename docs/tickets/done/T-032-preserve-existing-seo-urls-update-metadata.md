@@ -55,4 +55,4 @@ Keep manually maintained or previously generated SEO URL fields unchanged in XT 
 
 ## Result
 
-Completed locally; commit hash will be recorded after commit creation.
+Completed locally in commit `1e59ba6` (`Implement T-032 SEO metadata preservation`). Push remains intentionally pending until explicitly requested.

@@ -80,3 +80,7 @@ Implement `T-032` by preserving existing XT SEO URL fields on product sync while
 # Recommended next step
 
 If category SEO should follow the same behavior, apply the same per-row preserve/update rule to category SEO writes on top of the existing config-driven SEO path.
+
+# Commit
+
+- `1e59ba6` - `Implement T-032 SEO metadata preservation`
