@@ -8,13 +8,15 @@ abstract class AbstractXtWriter implements XtQueueWriter
     protected WelaApiClient $client;
 
     private array $lookupCaches = [];
+    private ?array $seoUrlIndex = null;
 
     public function __construct(array $sourcesConfig, array $xtWriteConfig)
     {
         $connection = $sourcesConfig['sources']['xt']['connection'] ?? [];
         $this->client = new WelaApiClient(
             (string) ($connection['url'] ?? ''),
-            (string) ($connection['key'] ?? '')
+            (string) ($connection['key'] ?? ''),
+            max(1, (int) ($connection['request_timeout_seconds'] ?? 30))
         );
         $this->writeConfig = $xtWriteConfig['write'] ?? [];
     }
@@ -174,6 +176,10 @@ abstract class AbstractXtWriter implements XtQueueWriter
             return str_contains($trimmed, '.') ? (float) $trimmed : (int) $trimmed;
         }
 
+        if (strtolower($trimmed) === 'null') {
+            return null;
+        }
+
         return $trimmed;
     }
 
@@ -207,5 +213,76 @@ abstract class AbstractXtWriter implements XtQueueWriter
         }
 
         return $record;
+    }
+
+    protected function reserveUniqueSeoUrl(string $urlText, string $languageCode, string $fallbackSlug): string
+    {
+        $urlText = trim($urlText, '/');
+        $fallbackSlug = trim($fallbackSlug, '-');
+
+        if ($urlText === '') {
+            return $urlText;
+        }
+
+        $index = $this->seoUrlIndex();
+        $index[$languageCode] ??= [];
+
+        $candidate = $urlText;
+        $suffix = $fallbackSlug !== '' ? $fallbackSlug : 'item';
+        $counter = 2;
+
+        while (isset($index[$languageCode][$candidate])) {
+            $candidate = $urlText . '-' . $suffix;
+
+            if ($counter > 2) {
+                $candidate .= '-' . $counter;
+            }
+
+            $counter++;
+        }
+
+        $index[$languageCode][$candidate] = true;
+        $this->seoUrlIndex = $index;
+
+        return $candidate;
+    }
+
+    private function seoUrlIndex(): array
+    {
+        if ($this->seoUrlIndex !== null) {
+            return $this->seoUrlIndex;
+        }
+
+        $index = [];
+        $offset = 0;
+
+        do {
+            $page = $this->client->fetchRows('xt_seo_url', ['url_text', 'language_code'], $offset, 2000);
+            $rows = is_array($page['rows'] ?? null) ? $page['rows'] : [];
+
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $urlText = trim((string) ($row['url_text'] ?? ''), '/');
+                $languageCode = trim((string) ($row['language_code'] ?? ''));
+
+                if ($urlText === '' || $languageCode === '') {
+                    continue;
+                }
+
+                $index[$languageCode][$urlText] = true;
+            }
+
+            $nextOffset = $page['next_offset'] ?? null;
+            if (!is_int($nextOffset) || $nextOffset <= $offset) {
+                break;
+            }
+
+            $offset = $nextOffset;
+        } while (true);
+
+        return $this->seoUrlIndex = $index;
     }
 }

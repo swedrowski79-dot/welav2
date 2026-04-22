@@ -9,6 +9,7 @@ use App\Web\Core\Html;
 use App\Web\Core\Paginator;
 use App\Web\Core\Request;
 use App\Web\Core\Response;
+use App\Web\Repository\EnvFileRepository;
 use App\Web\Repository\MonitoringRepository;
 use App\Web\Repository\PipelineAdminRepository;
 use App\Web\Repository\SchemaHealthRepository;
@@ -23,8 +24,8 @@ final class PipelineController extends Controller
         $stageDb = StageConnection::make();
         $repository = new PipelineAdminRepository($stageDb, \web_config('admin'), \web_config('delta'));
         $monitoringRepository = new MonitoringRepository($stageDb);
-        $schemaHealth = new SchemaHealthRepository();
-        $consistencyRepository = new StageConsistencyRepository();
+        $schemaHealth = new SchemaHealthRepository(\web_config('delta'));
+        $consistencyRepository = new StageConsistencyRepository(\web_config('delta'));
         $filters = [
             'entity_type' => $request->string('entity_type'),
             'status' => $request->string('status'),
@@ -43,6 +44,10 @@ final class PipelineController extends Controller
         $pipelineSections = \PipelineConfig::sections('pipeline');
         $latestDeltaRun = $monitoringRepository->latestRunByTypes(['delta', 'expand']);
         $latestWorkerRun = $monitoringRepository->latestRunByTypes(['export_queue_worker']);
+        $envValues = (new EnvFileRepository())->load();
+        $deltaConfig = \web_config('delta');
+        $defaultExportWorkerBatchSize = (int) (($deltaConfig['product_export_queue']['worker_batch_size'] ?? 1000));
+        $exportWorkerBatchSize = (string) ($envValues['EXPORT_WORKER_BATCH_SIZE'] ?? (string) $defaultExportWorkerBatchSize);
 
         return $this->render('pipeline/index', [
             'pageTitle' => 'Pipeline & Export Queue',
@@ -64,12 +69,14 @@ final class PipelineController extends Controller
             'progressSummary' => $progressSummary,
             'pipelineSections' => $pipelineSections,
             'refreshSeconds' => $focusRun ? 10 : null,
+            'entityTypes' => $repository->entityTypes(),
             'runLogCount' => $monitoringRepository->countLogsForRun((int) ($latestRun['id'] ?? 0)),
             'latestError' => $monitoringRepository->latestPipelineError(),
             'recentLogs' => $recentLogs,
             'latestDeltaVisibility' => $this->deltaVisibility($latestDeltaRun),
             'latestWorkerVisibility' => $this->workerVisibility($latestWorkerRun),
             'recentExportWorkerIssues' => $monitoringRepository->recentExportWorkerIssues(10),
+            'exportWorkerBatchSize' => $exportWorkerBatchSize,
             'started' => $request->query('started') === '1',
             'migrationsDone' => $request->int('migrations_done'),
             'resetDone' => $request->string('reset_done'),
@@ -91,9 +98,10 @@ final class PipelineController extends Controller
 
         return $this->render('pipeline/state', [
             'pageTitle' => 'Export States',
-            'pageSubtitle' => 'Persistenter Delta-Zustand fuer Produkt-, Medien- und Dokument-Export mit letztem Hash und letzter Sichtung.',
+            'pageSubtitle' => 'Persistenter Delta-Zustand fuer die konfigurierten Export-Entity-Typen mit letztem Hash und letzter Sichtung.',
             'entries' => $repository->paginatedStateEntries($filters, $paginator),
             'filters' => $filters,
+            'entityTypes' => $repository->entityTypes(),
             'paginator' => $paginator,
             'currentPath' => '/pipeline',
         ]);
@@ -102,9 +110,27 @@ final class PipelineController extends Controller
     public function start(Request $request): void
     {
         $job = $request->postString('job');
+        $batchSizeRaw = $request->postString('batch_size');
+        $batchSize = max(0, (int) $batchSizeRaw);
 
         try {
-            (new SyncLauncher())->launch($job);
+            $options = [];
+
+            if (in_array($job, ['export_queue_worker', 'full_pipeline'], true) && $batchSizeRaw !== '') {
+                if ($batchSize < 1) {
+                    throw new \InvalidArgumentException('Batchgroesse muss groesser als 0 sein.');
+                }
+
+                (new EnvFileRepository())->save([
+                    'EXPORT_WORKER_BATCH_SIZE' => (string) $batchSize,
+                ]);
+            }
+
+            if ($job === 'export_queue_worker' && $batchSize > 0) {
+                $options['batch_size'] = $batchSize;
+            }
+
+            (new SyncLauncher())->launch($job, $options);
             Response::redirect(Html::buildUrl('/pipeline', ['started' => 1]));
         } catch (\Throwable $exception) {
             Response::redirect(Html::buildUrl('/pipeline', ['error' => $exception->getMessage()]));
@@ -128,12 +154,13 @@ final class PipelineController extends Controller
         }
 
         try {
-            $repository = new PipelineAdminRepository(StageConnection::make(), \web_config('admin'));
+            $repository = new PipelineAdminRepository(StageConnection::make(), \web_config('admin'), \web_config('delta'));
 
             match ($action) {
                 'queue' => $repository->resetQueue(),
                 'stage' => $repository->resetStageTables(),
                 'delta_state' => $repository->resetDeltaState(),
+                'mirror' => $repository->resetMirrorTables(),
                 'logs' => $repository->resetLogs(),
                 'errors' => $repository->resetErrors(),
                 'runs' => $repository->resetRunsHistory(),

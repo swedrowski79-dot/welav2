@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `documents_file` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL,
+    `reference_count` INT NOT NULL DEFAULT 0,
+    `local_path` VARCHAR(1024) NULL,
+    `file_hash` VARCHAR(64) NULL,
+    `file_size` BIGINT NULL,
+    `file_created_at` DATETIME NULL,
+    `file_modified_at` DATETIME NULL,
+    `upload` TINYINT NOT NULL DEFAULT 0,
+    `uploaded_at` DATETIME NULL,
+    `shop_server_path` VARCHAR(1024) NULL,
+    `last_scan_at` DATETIME NULL,
+    `last_error` TEXT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uniq_documents_file_title` (`title`),
+    KEY `idx_documents_file_upload` (`upload`),
+    KEY `idx_documents_file_hash` (`file_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

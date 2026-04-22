@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 final class XtMediaDocumentWriter extends AbstractXtWriter
 {
+    private ?array $documentMediaRowsById = null;
+    private ?array $documentMediaLinks = null;
+
     public function supports(string $entityType): bool
     {
         return in_array($entityType, ['media', 'document'], true);
@@ -71,12 +74,22 @@ final class XtMediaDocumentWriter extends AbstractXtWriter
             (array) ($relationDefinition['identity_columns'] ?? [])
         );
 
-        $this->client->upsertRow(
+        $relationResult = $this->client->upsertRow(
             (string) ($relationDefinition['table'] ?? ''),
             $relationIdentity,
             $relationColumns,
             'ml_id'
         );
+
+        if ($entityType === 'document') {
+            $this->rememberDocumentMediaRow($primaryKeyValue, $identityValue, $entityColumns);
+            $this->rememberDocumentMediaLink($relationResult['primary_key_value'] ?? null, $relationColumns);
+            $this->deleteStaleDocumentLinks(
+                (string) ($relationDefinition['table'] ?? ''),
+                $stageRow,
+                $relationResult['primary_key_value'] ?? null
+            );
+        }
     }
 
     private function definitionsForEntityType(string $entityType): array
@@ -168,5 +181,153 @@ final class XtMediaDocumentWriter extends AbstractXtWriter
         }
 
         $this->resolveExpression($linkExpression, ['stage' => $stageRow], false);
+    }
+
+    private function deleteStaleDocumentLinks(string $relationTable, array $stageRow, mixed $currentRelationId): void
+    {
+        $fileName = trim((string) ($stageRow['file_name'] ?? ''));
+        $productId = $this->lookupMap('xt_products', 'external_id', 'products_id')[(string) ($stageRow['afs_artikel_id'] ?? '')] ?? null;
+        $currentRelationId = trim((string) ($currentRelationId ?? ''));
+
+        if ($relationTable === '' || $fileName === '' || ($productId !== 0 && $productId !== '0' && empty($productId))) {
+            return;
+        }
+
+        foreach ($this->documentMediaLinks() as $index => $link) {
+            $linkId = trim((string) ($link['link_id'] ?? ''));
+            $mediaLinkId = trim((string) ($link['ml_id'] ?? ''));
+            $mediaId = trim((string) ($link['m_id'] ?? ''));
+
+            if ($linkId === '' || $mediaLinkId === '' || $mediaId === '') {
+                continue;
+            }
+
+            if ($linkId !== trim((string) $productId) || $mediaLinkId === $currentRelationId) {
+                continue;
+            }
+
+            $media = $this->documentMediaRowsById()[$mediaId] ?? null;
+            if (!is_array($media)) {
+                continue;
+            }
+
+            if (trim((string) ($media['type'] ?? '')) !== 'files') {
+                continue;
+            }
+
+            if (trim((string) ($media['file'] ?? '')) !== $fileName) {
+                continue;
+            }
+
+            $this->client->deleteRows($relationTable, ['ml_id' => $mediaLinkId]);
+            unset($this->documentMediaLinks[$index]);
+        }
+
+        if (is_array($this->documentMediaLinks)) {
+            $this->documentMediaLinks = array_values($this->documentMediaLinks);
+        }
+    }
+
+    private function documentMediaRowsById(): array
+    {
+        if ($this->documentMediaRowsById !== null) {
+            return $this->documentMediaRowsById;
+        }
+
+        $rowsById = [];
+
+        foreach ($this->fetchAllRows('xt_media', ['id', 'external_id', 'file', 'type', 'class']) as $row) {
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+
+            $rowsById[$id] = $row;
+        }
+
+        $this->documentMediaRowsById = $rowsById;
+
+        return $this->documentMediaRowsById;
+    }
+
+    private function documentMediaLinks(): array
+    {
+        if ($this->documentMediaLinks !== null) {
+            return $this->documentMediaLinks;
+        }
+
+        $this->documentMediaLinks = $this->fetchAllRows('xt_media_link', ['ml_id', 'm_id', 'link_id', 'class', 'type', 'sort_order']);
+
+        return $this->documentMediaLinks;
+    }
+
+    private function fetchAllRows(string $table, array $fields): array
+    {
+        $rows = [];
+        $offset = 0;
+
+        do {
+            $page = $this->client->fetchRows($table, $fields, $offset, 2000);
+            $pageRows = is_array($page['rows'] ?? null) ? $page['rows'] : [];
+
+            foreach ($pageRows as $row) {
+                if (is_array($row)) {
+                    $rows[] = $row;
+                }
+            }
+
+            $nextOffset = $page['next_offset'] ?? null;
+            if (!is_int($nextOffset) || $nextOffset <= $offset) {
+                break;
+            }
+
+            $offset = $nextOffset;
+        } while (true);
+
+        return $rows;
+    }
+
+    private function rememberDocumentMediaRow(mixed $mediaId, string $externalId, array $entityColumns): void
+    {
+        if ($this->documentMediaRowsById === null) {
+            return;
+        }
+
+        $mediaId = trim((string) ($mediaId ?? ''));
+        if ($mediaId === '') {
+            return;
+        }
+
+        $this->documentMediaRowsById[$mediaId] = [
+            'id' => $mediaId,
+            'external_id' => $externalId,
+            'file' => $entityColumns['file'] ?? null,
+            'type' => $entityColumns['type'] ?? null,
+            'class' => $entityColumns['class'] ?? null,
+        ];
+    }
+
+    private function rememberDocumentMediaLink(mixed $mediaLinkId, array $relationColumns): void
+    {
+        if ($this->documentMediaLinks === null) {
+            return;
+        }
+
+        $mediaLinkId = trim((string) ($mediaLinkId ?? ''));
+        if ($mediaLinkId === '') {
+            return;
+        }
+
+        foreach ($this->documentMediaLinks as $index => $link) {
+            if (trim((string) ($link['ml_id'] ?? '')) !== $mediaLinkId) {
+                continue;
+            }
+
+            $this->documentMediaLinks[$index] = array_merge($link, ['ml_id' => $mediaLinkId], $relationColumns);
+
+            return;
+        }
+
+        $this->documentMediaLinks[] = array_merge(['ml_id' => $mediaLinkId], $relationColumns);
     }
 }

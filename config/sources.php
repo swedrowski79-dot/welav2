@@ -82,6 +82,9 @@ $qualifiedAfsTable = static function (string $tableName) use ($env): string {
 $afsArticlesTable = $qualifiedAfsTable($env('AFS_ARTICLES_TABLE', 'Artikel'));
 $afsCategoriesTable = $qualifiedAfsTable($env('AFS_CATEGORIES_TABLE', 'Warengruppe'));
 $afsDocumentsTable = $qualifiedAfsTable($env('AFS_DOCUMENTS_TABLE', 'Dokument'));
+$extraArticlesTable = $env('EXTRA_ARTICLES_TABLE', 'article_translations');
+$extraAttributeTranslationsTable = $env('EXTRA_ATTRIBUTE_TRANSLATIONS_TABLE', 'attribute_translations');
+$extraCategoriesTable = $env('EXTRA_CATEGORIES_TABLE', 'category_translations');
 
 $detectExtraPath = static function () use ($projectRoot): string {
     $explicit = getenv('EXTRA_SQLITE_PATH');
@@ -103,6 +106,15 @@ $detectExtraPath = static function () use ($projectRoot): string {
     }
 
     return $candidates[0];
+};
+
+$detectMissingTranslationsPath = static function () use ($projectRoot): string {
+    $explicit = getenv('MISSING_TRANSLATIONS_SQLITE_PATH');
+    if ($explicit !== false && $explicit !== '') {
+        return $explicit;
+    }
+
+    return $projectRoot . '/data/missing_translations.sqlite';
 };
 
 return [
@@ -202,7 +214,7 @@ return [
             ],
         ],
 
-        'extra' => [
+        'extra_sqlite_bootstrap' => [
             'type' => 'sqlite',
             'write_batch_size' => 250,
             'connection' => [
@@ -218,6 +230,7 @@ return [
                         'master_article_number',
                         'language',
                         'article_name',
+                        'intro_text',
                         'description',
                         'technical_data_html',
                         'attribute_name1',
@@ -249,11 +262,79 @@ return [
             ],
         ],
 
+        'extra' => [
+            'type' => 'mysql',
+            'write_batch_size' => 250,
+            'connection' => [
+                'host' => $env('EXTRA_DB_HOST', $isDocker ? 'mysql' : '127.0.0.1'),
+                'port' => $envInt('EXTRA_DB_PORT', 3306),
+                'database' => $env('EXTRA_DB_NAME', 'afs_extras'),
+                'username' => $env('EXTRA_DB_USER', 'stage'),
+                'password' => $env('EXTRA_DB_PASS', 'stage'),
+                'charset' => 'utf8mb4',
+            ],
+            'entities' => [
+                'article_translations' => [
+                    'table' => $extraArticlesTable,
+                    'columns' => [
+                        'id',
+                        'artikel_id',
+                        'article_number',
+                        'master_article_number',
+                        'language',
+                        'article_name',
+                        'intro_text',
+                        'description',
+                        'technical_data_html',
+                        'attribute_name1',
+                        'attribute_name2',
+                        'attribute_name3',
+                        'attribute_name4',
+                        'attribute_value1',
+                        'attribute_value2',
+                        'attribute_value3',
+                        'attribute_value4',
+                        'meta_title',
+                        'meta_description',
+                        'is_master',
+                        'source_directory',
+                    ],
+                ],
+                'attribute_translations' => [
+                    'table' => $extraAttributeTranslationsTable,
+                    'columns' => [
+                        'id',
+                        'article_id',
+                        'article_number',
+                        'sort_order',
+                        'language',
+                        'attribute_name',
+                        'attribute_value',
+                        'source_directory',
+                    ],
+                ],
+                'category_translations' => [
+                    'table' => $extraCategoriesTable,
+                    'columns' => [
+                        'id',
+                        'warengruppen_id',
+                        'original_name',
+                        'language',
+                        'translated_name',
+                        'meta_description',
+                        'meta_title',
+                    ],
+                ],
+            ],
+        ],
+
         'xt' => [
             'type' => 'xt_api',
             'connection' => [
                 'url' => $env('XT_API_URL', 'http://10.0.1.104/wela-api'),
                 'key' => $env('XT_API_KEY', ''),
+                'request_timeout_seconds' => $envInt('XT_API_TIMEOUT_SECONDS', 300),
+                'product_batch_request_size' => $envInt('XT_PRODUCT_BATCH_REQUEST_SIZE', 1000),
             ],
         ],
 
@@ -265,6 +346,18 @@ return [
                 'database' => $env('STAGE_DB_NAME', 'stage_sync'),
                 'username' => $env('STAGE_DB_USER', 'stage'),
                 'password' => $env('STAGE_DB_PASS', 'stage'),
+                'charset' => 'utf8mb4',
+            ],
+        ],
+
+        'missing_translations' => [
+            'type' => 'mysql',
+            'connection' => [
+                'host' => $env('EXTRA_DB_HOST', $isDocker ? 'mysql' : '127.0.0.1'),
+                'port' => $envInt('EXTRA_DB_PORT', 3306),
+                'database' => $env('EXTRA_DB_NAME', 'afs_extras'),
+                'username' => $env('EXTRA_DB_USER', 'stage'),
+                'password' => $env('EXTRA_DB_PASS', 'stage'),
                 'charset' => 'utf8mb4',
             ],
         ],

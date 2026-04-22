@@ -12,7 +12,8 @@ final class SourceStatusRepository
 
         return [
             'afs' => $this->checkConnection('AFS', $sources['afs']),
-            'extra' => $this->checkSqlite($sources['extra']),
+            'extra' => $this->checkConnection('AFS Extras', $sources['extra']),
+            'extra_sqlite_bootstrap' => $this->checkSqlite($sources['extra_sqlite_bootstrap']),
             'xt' => $this->checkXtApi($sources['xt']),
             'stage' => $this->checkConnection('Stage', $sources['stage']),
         ];
@@ -44,13 +45,13 @@ final class SourceStatusRepository
 
         if (!is_file($path)) {
             return [
-                'label' => 'Extra SQLite',
+                'label' => 'SQLite Bootstrap',
                 'status' => 'unreachable',
                 'message' => "Datei nicht gefunden: {$path}",
             ];
         }
 
-        return $this->checkConnection('Extra SQLite', $config);
+        return $this->checkConnection('SQLite Bootstrap', $config);
     }
 
     private function checkXtApi(array $config): array

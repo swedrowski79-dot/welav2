@@ -134,7 +134,7 @@ final class XtSnapshotService
         $sources = [];
 
         foreach ($this->mirrorDefinitions as $table => $definition) {
-            $sourceTable = (string) ($definition['table'] ?? $table);
+            $sourceTable = (string) ($definition['source_table'] ?? $definition['table'] ?? $table);
             $sources[$table] = $this->fetchTable(
                 $sourceTable,
                 is_array($definition['fields'] ?? null) ? $definition['fields'] : []
@@ -195,6 +195,7 @@ final class XtSnapshotService
             $mirrorTable = (string) ($definition['mirror_table'] ?? '');
             $fields = is_array($definition['fields'] ?? null) ? $definition['fields'] : [];
             $rows = is_array($sources[$table]['rows'] ?? null) ? $sources[$table]['rows'] : [];
+            $keyFields = $definition['key'] ?? [];
 
             if ($mirrorTable === '' || $fields === []) {
                 continue;
@@ -209,13 +210,15 @@ final class XtSnapshotService
 
                 $mirrorRow = [];
                 foreach ($fields as $field) {
-                    $mirrorRow[$field] = $row[$field] ?? null;
+                    $mirrorRow[$field] = $this->normalizeMirrorValue($row[$field] ?? null);
                 }
 
                 $mirrorRow['imported_at'] = $importedAt;
                 $mirrorRow['snapshot_hash'] = $this->hashSnapshot($mirrorRow, ['snapshot_hash', 'imported_at']);
                 $mirrorRows[$mirrorTable][] = $mirrorRow;
             }
+
+            $mirrorRows[$mirrorTable] = $this->uniqueMirrorRows($mirrorRows[$mirrorTable], $keyFields);
         }
 
         return $mirrorRows;
@@ -636,6 +639,33 @@ final class XtSnapshotService
         }
     }
 
+    private function uniqueMirrorRows(array $rows, mixed $keyFields): array
+    {
+        $keys = is_array($keyFields) ? $keyFields : [$keyFields];
+        $keys = array_values(array_filter($keys, static fn (mixed $field): bool => is_string($field) && $field !== ''));
+
+        if ($keys === []) {
+            return $rows;
+        }
+
+        $unique = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $identity = [];
+            foreach ($keys as $field) {
+                $identity[$field] = $row[$field] ?? null;
+            }
+
+            $unique[json_encode($identity, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]'] = $row;
+        }
+
+        return array_values($unique);
+    }
+
     private function hashSnapshot(array $row, array $exclude = []): string
     {
         foreach ($exclude as $key) {
@@ -645,6 +675,21 @@ final class XtSnapshotService
         ksort($row);
 
         return hash('sha256', json_encode($row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}');
+    }
+
+    private function normalizeMirrorValue(mixed $value): mixed
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+
+        $normalized = trim($value);
+
+        if ($normalized === '0000-00-00 00:00:00' || $normalized === '0000-00-00') {
+            return null;
+        }
+
+        return $value;
     }
 
     private function log(string $level, string $message, array $context = []): void

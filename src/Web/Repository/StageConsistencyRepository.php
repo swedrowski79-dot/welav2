@@ -6,6 +6,10 @@ namespace App\Web\Repository;
 
 final class StageConsistencyRepository
 {
+    public function __construct(private array $deltaConfig = [])
+    {
+    }
+
     /**
      * @return array{summary: array{issues:int, checks:int, affected_rows:int}, checks:list<array{name:string,count:int,severity:string,description:string,examples:list<string>}>}
      */
@@ -44,6 +48,53 @@ final class StageConsistencyRepository
     }
 
     /**
+     * @return list<array{article_id:string,article_number:?string,article_name:?string}>
+     */
+    public function missingProductsWithoutTranslations(\PDO $stageDb): array
+    {
+        if (!$this->tablesExist($stageDb, ['stage_products', 'stage_product_translations'])) {
+            return [];
+        }
+
+        $stmt = $stageDb->query(
+            'SELECT
+                CAST(p.afs_artikel_id AS CHAR) AS article_id,
+                p.sku AS article_number,
+                p.name_default AS article_name
+             FROM stage_products p
+             LEFT JOIN stage_product_translations t ON t.afs_artikel_id = p.afs_artikel_id
+             WHERE p.afs_artikel_id IS NOT NULL
+               AND t.afs_artikel_id IS NULL
+             ORDER BY p.afs_artikel_id ASC'
+        );
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * @return list<array{category_id:string,category_name:?string}>
+     */
+    public function missingCategoriesWithoutTranslations(\PDO $stageDb): array
+    {
+        if (!$this->tablesExist($stageDb, ['stage_categories', 'stage_category_translations'])) {
+            return [];
+        }
+
+        $stmt = $stageDb->query(
+            'SELECT
+                CAST(c.afs_wg_id AS CHAR) AS category_id,
+                c.name_default AS category_name
+             FROM stage_categories c
+             LEFT JOIN stage_category_translations t ON t.afs_wg_id = c.afs_wg_id
+             WHERE c.afs_wg_id IS NOT NULL
+               AND t.afs_wg_id IS NULL
+             ORDER BY c.afs_wg_id ASC'
+        );
+
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    /**
      * @return list<array{name:string,severity:string,description:string,tables:list<string>,count_sql:string,example_sql:string}>
      */
     private function definitions(): array
@@ -74,6 +125,14 @@ final class StageConsistencyRepository
                 'example_sql' => 'SELECT c.afs_wg_id FROM stage_categories c LEFT JOIN stage_category_translations t ON t.afs_wg_id = c.afs_wg_id WHERE c.afs_wg_id IS NOT NULL AND t.afs_wg_id IS NULL ORDER BY c.afs_wg_id ASC LIMIT 5',
             ],
             [
+                'name' => 'Kategorie-Uebersetzungen ohne Kategorie',
+                'severity' => 'warning',
+                'description' => 'Stage-Kategorie-Uebersetzungen referenzieren Kategorien, die in `stage_categories` nicht vorhanden sind.',
+                'tables' => ['stage_categories', 'stage_category_translations'],
+                'count_sql' => 'SELECT COUNT(*) FROM stage_category_translations t LEFT JOIN stage_categories c ON c.afs_wg_id = t.afs_wg_id WHERE t.afs_wg_id IS NOT NULL AND c.afs_wg_id IS NULL',
+                'example_sql' => 'SELECT t.afs_wg_id FROM stage_category_translations t LEFT JOIN stage_categories c ON c.afs_wg_id = t.afs_wg_id WHERE t.afs_wg_id IS NOT NULL AND c.afs_wg_id IS NULL ORDER BY t.afs_wg_id ASC LIMIT 5',
+            ],
+            [
                 'name' => 'Attributzeilen ohne Produkt-Uebersetzung',
                 'severity' => 'danger',
                 'description' => 'Attributzeilen haben kein passendes Produkt-Uebersetzungsziel fuer Produkt und Sprache.',
@@ -82,12 +141,28 @@ final class StageConsistencyRepository
                 'example_sql' => 'SELECT CONCAT(a.afs_artikel_id, \':\', a.language_code) FROM stage_attribute_translations a LEFT JOIN stage_product_translations t ON t.afs_artikel_id = a.afs_artikel_id AND t.language_code = a.language_code WHERE a.afs_artikel_id IS NOT NULL AND t.afs_artikel_id IS NULL ORDER BY a.afs_artikel_id ASC, a.language_code ASC LIMIT 5',
             ],
             [
+                'name' => 'Attributzeilen ohne Produkt',
+                'severity' => 'warning',
+                'description' => 'Stage-Attributzeilen referenzieren Produkte, die in `stage_products` nicht vorhanden sind.',
+                'tables' => ['stage_attribute_translations', 'stage_products'],
+                'count_sql' => 'SELECT COUNT(*) FROM stage_attribute_translations a LEFT JOIN stage_products p ON p.afs_artikel_id = a.afs_artikel_id WHERE a.afs_artikel_id IS NOT NULL AND p.afs_artikel_id IS NULL',
+                'example_sql' => 'SELECT a.afs_artikel_id FROM stage_attribute_translations a LEFT JOIN stage_products p ON p.afs_artikel_id = a.afs_artikel_id WHERE a.afs_artikel_id IS NOT NULL AND p.afs_artikel_id IS NULL ORDER BY a.afs_artikel_id ASC LIMIT 5',
+            ],
+            [
                 'name' => 'Export-State ohne aktuelles Produkt',
                 'severity' => 'warning',
                 'description' => 'Persistenter Export-State verweist auf Produkte, die aktuell nicht mehr in `stage_products` vorhanden sind.',
                 'tables' => ['product_export_state', 'stage_products'],
                 'count_sql' => 'SELECT COUNT(*) FROM product_export_state s LEFT JOIN stage_products p ON p.afs_artikel_id = s.product_id WHERE p.afs_artikel_id IS NULL',
                 'example_sql' => 'SELECT s.product_id FROM product_export_state s LEFT JOIN stage_products p ON p.afs_artikel_id = s.product_id WHERE p.afs_artikel_id IS NULL ORDER BY s.product_id ASC LIMIT 5',
+            ],
+            [
+                'name' => 'Kategorie-Export-State ohne aktuelle Kategorie',
+                'severity' => 'warning',
+                'description' => 'Persistenter Kategorie-Export-State verweist auf Kategorien, die aktuell nicht mehr in `stage_categories` vorhanden sind.',
+                'tables' => ['category_export_state', 'stage_categories'],
+                'count_sql' => 'SELECT COUNT(*) FROM category_export_state s LEFT JOIN stage_categories c ON c.afs_wg_id = s.category_id WHERE c.afs_wg_id IS NULL',
+                'example_sql' => 'SELECT s.category_id FROM category_export_state s LEFT JOIN stage_categories c ON c.afs_wg_id = s.category_id WHERE c.afs_wg_id IS NULL ORDER BY s.category_id ASC LIMIT 5',
             ],
             [
                 'name' => 'Media-Export-State ohne aktuelles Medium',

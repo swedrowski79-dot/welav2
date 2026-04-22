@@ -45,6 +45,8 @@ class Normalizer
 
     private function resolveCalculated(string $resolver, array $normalized, array $raw)
     {
+        $variantFlag = trim((string)($normalized['variant_flag'] ?? ''));
+
         switch ($resolver) {
             case 'calc:normalize_language_code':
                 $value = strtoupper(trim((string)($normalized['language_code'] ?? $raw['language'] ?? $raw['Sprache'] ?? '')));
@@ -52,28 +54,25 @@ class Normalizer
                 return $map[$value] ?? strtolower($value);
 
             case 'calc:product_type_from_variant_flag':
-                $flag = trim((string)($normalized['variant_flag'] ?? ''));
-                if ($flag === 'Master') {
+                if ($variantFlag !== '' && strcasecmp($variantFlag, 'Master') === 0) {
                     return 'master';
                 }
-                if ($flag === '') {
+                if ($variantFlag === '') {
                     return 'standard';
                 }
                 return 'slave';
 
             case 'calc:is_master':
-                return trim((string)($normalized['variant_flag'] ?? '')) === 'Master' ? 1 : 0;
+                return ($variantFlag !== '' && strcasecmp($variantFlag, 'Master') === 0) ? 1 : 0;
 
             case 'calc:is_slave':
-                $flag = trim((string)($normalized['variant_flag'] ?? ''));
-                return ($flag !== '' && strcasecmp($flag, 'Master') !== 0) ? 1 : 0;
+                return ($variantFlag !== '' && strcasecmp($variantFlag, 'Master') !== 0) ? 1 : 0;
 
             case 'calc:is_standard':
-                return trim((string)($normalized['variant_flag'] ?? '')) === '' ? 1 : 0;
+                return $variantFlag === '' ? 1 : 0;
 
             case 'calc:master_sku':
-                $flag = trim((string)($normalized['variant_flag'] ?? ''));
-                return ($flag !== '' && strcasecmp($flag, 'Master') !== 0) ? $flag : null;
+                return ($variantFlag !== '' && strcasecmp($variantFlag, 'Master') !== 0) ? $variantFlag : null;
 
             case 'calc:afs_category_online_flag':
                 return 1;

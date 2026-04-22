@@ -22,6 +22,11 @@ services:
       STAGE_DB_NAME: ${STAGE_DB_NAME:-stage_sync}
       STAGE_DB_USER: ${STAGE_DB_USER:-stage}
       STAGE_DB_PASS: ${STAGE_DB_PASS:-stage}
+      EXTRA_DB_HOST: ${EXTRA_DB_HOST:-mysql}
+      EXTRA_DB_PORT: ${EXTRA_DB_PORT:-3306}
+      EXTRA_DB_NAME: ${EXTRA_DB_NAME:-afs_extras}
+      EXTRA_DB_USER: ${EXTRA_DB_USER:-stage}
+      EXTRA_DB_PASS: ${EXTRA_DB_PASS:-stage}
       EXTRA_SQLITE_PATH: ${EXTRA_SQLITE_PATH:-/app/data/extra.sqlite}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -31,7 +36,8 @@ services:
 
   mysql:
     image: mysql:8.0
-    command: --default-authentication-plugin=mysql_native_password
+    entrypoint: ["/bin/bash", "/opt/welav2/mysql/entrypoint.sh"]
+    command: ["mysqld", "--default-authentication-plugin=mysql_native_password", "--skip-log-bin"]
     ports:
       - "3306:3306"
     environment:
@@ -39,8 +45,12 @@ services:
       MYSQL_USER: stage
       MYSQL_PASSWORD: stage
       MYSQL_ROOT_PASSWORD: root
+      MYSQL_RAMDISK_ENABLED: ${MYSQL_RAMDISK_ENABLED:-1}
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mysql_data:/var/lib/mysql-persistent
+      - ./docker/mysql:/opt/welav2/mysql:ro
+    tmpfs:
+      - /mnt/mysql-ram:size=${MYSQL_RAMDISK_SIZE_BYTES:-8589934592}
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s

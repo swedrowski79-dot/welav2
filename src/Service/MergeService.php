@@ -34,7 +34,9 @@ class MergeService
         $baseRows = $this->fetchRows($baseTable);
         $matches = $definition['match'] ?? [];
         $requiredFields = $definition['required_fields'] ?? [];
+        $uniqueBy = $definition['unique_by'] ?? [];
         $matchIndexes = $this->buildMatchIndexes($matches);
+        $seenUniqueRows = [];
         $batch = [];
 
         foreach ($baseRows as $baseRow) {
@@ -51,6 +53,10 @@ class MergeService
             }
 
             if (!$this->hasRequiredFields($merged, $requiredFields)) {
+                continue;
+            }
+
+            if ($this->isDuplicateMergedRow($merged, $uniqueBy, $seenUniqueRows)) {
                 continue;
             }
 
@@ -163,6 +169,36 @@ class MergeService
         }
 
         return true;
+    }
+
+    private function isDuplicateMergedRow(array $row, array $uniqueBy, array &$seenUniqueRows): bool
+    {
+        if ($uniqueBy === []) {
+            return false;
+        }
+
+        $values = [];
+
+        foreach ($uniqueBy as $field) {
+            if (!is_string($field) || $field === '') {
+                throw new RuntimeException('Merge unique_by must contain only non-empty field names.');
+            }
+
+            $values[$field] = $row[$field] ?? null;
+        }
+
+        $key = json_encode($values, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($key)) {
+            throw new RuntimeException('Merge unique_by key could not be serialized.');
+        }
+
+        if (isset($seenUniqueRows[$key])) {
+            return true;
+        }
+
+        $seenUniqueRows[$key] = true;
+
+        return false;
     }
 
     private function insertRows(string $table, array $rows): void

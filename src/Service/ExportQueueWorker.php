@@ -19,6 +19,7 @@ final class ExportQueueWorker
     private int $workerBatchSize;
     private int $workerMaxAttempts;
     private int $workerRetryDelaySeconds;
+    private int $staleClaimSeconds;
 
     public function __construct(
         private PDO $stageDb,
@@ -85,22 +86,25 @@ final class ExportQueueWorker
         $this->workerBatchSize = max(1, (int) ($config['worker_batch_size'] ?? 100));
         $this->workerMaxAttempts = max(1, (int) ($config['worker_max_attempts'] ?? 3));
         $this->workerRetryDelaySeconds = max(0, (int) ($config['worker_retry_delay_seconds'] ?? 300));
+        $this->staleClaimSeconds = max($this->workerRetryDelaySeconds, 60);
     }
 
     private function runCurrentEntity(?int $limit = null): array
     {
+        $batchLimit = $limit ?? $this->workerBatchSize;
+        $releasedClaims = $this->releaseStaleClaims();
         $queueSnapshot = $this->queueAvailabilitySnapshot();
 
         if ($this->monitor !== null) {
             $this->monitor->log($this->runId, 'info', 'Export Queue Status vor Worker-Claim ermittelt.', [
                 'entity_type' => $this->entityType,
+                'released_stale_claims' => $releasedClaims,
                 ...$queueSnapshot,
             ]);
         }
 
-        $entries = $this->claimPendingEntries($limit ?? $this->workerBatchSize);
         $stats = [
-            'claimed' => count($entries),
+            'claimed' => 0,
             'processed' => 0,
             'done' => 0,
             'retried' => 0,
@@ -113,22 +117,90 @@ final class ExportQueueWorker
             'pending_ready_before' => $queueSnapshot['pending_ready'],
             'pending_delayed_before' => $queueSnapshot['pending_delayed'],
             'processing_before' => $queueSnapshot['processing_total'],
+            'released_stale_claims' => $releasedClaims,
+            'batches' => 0,
             'no_work_reason' => null,
         ];
 
-        if ($entries === []) {
-            $stats['no_work_reason'] = $this->noWorkReason($queueSnapshot);
+        while (true) {
+            $entries = $this->claimPendingEntries($batchLimit);
 
-            if ($this->monitor !== null) {
-                $this->monitor->log($this->runId, 'info', 'Export Queue Worker fand keine claimbaren Eintraege.', [
-                    'entity_type' => $this->entityType,
-                    'reason' => $stats['no_work_reason'],
-                    ...$queueSnapshot,
-                ]);
+            if ($entries === []) {
+                $stats['no_work_reason'] = $this->noWorkReason($this->queueAvailabilitySnapshot());
+
+                if ($this->monitor !== null && $stats['batches'] === 0) {
+                    $this->monitor->log($this->runId, 'info', 'Export Queue Worker fand keine claimbaren Eintraege.', [
+                        'entity_type' => $this->entityType,
+                        'reason' => $stats['no_work_reason'],
+                        ...$queueSnapshot,
+                    ]);
+                }
+
+                return $stats;
+            }
+
+            $stats['claimed'] += count($entries);
+            $stats['batches']++;
+
+            if ($this->xtWriter instanceof XtBatchQueueWriter && $this->xtWriter->supportsBatch($this->entityType)) {
+                $stats = $this->processBatchEntries($entries, $stats);
+                continue;
+            }
+
+            foreach ($entries as $entry) {
+                $queueId = (int) ($entry['id'] ?? 0);
+                if ($queueId <= 0) {
+                    continue;
+                }
+
+                $stats['processed']++;
+
+                try {
+                    $this->processEntry($entry);
+                    $stats['done']++;
+                } catch (Throwable $exception) {
+                    if ($this->stageDb->inTransaction()) {
+                        $this->stageDb->rollBack();
+                    }
+
+                    $result = $this->handleFailureSafely($entry, $exception);
+                    $stats[$result]++;
+                    $stats['issue']++;
+
+                    if ($result === 'permanent_error') {
+                        $stats['error']++;
+                    }
+                }
+            }
+        }
+    }
+
+    private function processBatchEntries(array $entries, array $stats): array
+    {
+        try {
+            $result = $this->xtWriter->writeBatch($this->entityType, $entries);
+        } catch (Throwable $exception) {
+            foreach ($entries as $entry) {
+                $queueId = (int) ($entry['id'] ?? 0);
+                if ($queueId <= 0) {
+                    continue;
+                }
+
+                $stats['processed']++;
+                $failure = $this->handleFailureSafely($entry, $exception);
+                $stats[$failure]++;
+                $stats['issue']++;
+
+                if ($failure === 'permanent_error') {
+                    $stats['error']++;
+                }
             }
 
             return $stats;
         }
+
+        $doneMap = is_array($result['done'] ?? null) ? $result['done'] : [];
+        $failedMap = is_array($result['failed'] ?? null) ? $result['failed'] : [];
 
         foreach ($entries as $entry) {
             $queueId = (int) ($entry['id'] ?? 0);
@@ -138,21 +210,40 @@ final class ExportQueueWorker
 
             $stats['processed']++;
 
-            try {
-                $this->processEntry($entry);
-                $stats['done']++;
-            } catch (Throwable $exception) {
-                if ($this->stageDb->inTransaction()) {
-                    $this->stageDb->rollBack();
+            if (isset($doneMap[$queueId])) {
+                $payload = $this->decodePayload($entry);
+                $confirmedHash = $this->confirmedHash($entry, $payload);
+
+                try {
+                    $this->stageDb->beginTransaction();
+                    $this->updateConfirmedState(trim((string) ($entry['entity_id'] ?? '')), $confirmedHash);
+                    $this->markDone($queueId, (string) ($entry['claim_token'] ?? ''));
+                    $this->stageDb->commit();
+                    $stats['done']++;
+                } catch (Throwable $exception) {
+                    if ($this->stageDb->inTransaction()) {
+                        $this->stageDb->rollBack();
+                    }
+
+                    $failure = $this->handleFailureSafely($entry, $exception);
+                    $stats[$failure]++;
+                    $stats['issue']++;
+
+                    if ($failure === 'permanent_error') {
+                        $stats['error']++;
+                    }
                 }
 
-                $result = $this->handleFailureSafely($entry, $exception);
-                $stats[$result]++;
-                $stats['issue']++;
+                continue;
+            }
 
-                if ($result === 'permanent_error') {
-                    $stats['error']++;
-                }
+            $exception = $failedMap[$queueId] ?? new RuntimeException('Batch-Export lieferte kein Ergebnis fuer Queue-Eintrag.');
+            $failure = $this->handleFailureSafely($entry, $exception);
+            $stats[$failure]++;
+            $stats['issue']++;
+
+            if ($failure === 'permanent_error') {
+                $stats['error']++;
             }
         }
 
@@ -395,6 +486,7 @@ final class ExportQueueWorker
             "UPDATE `{$this->queueTable}`
              SET status = :status,
                  processed_at = NOW(),
+                 claim_token = NULL,
                  last_error = NULL
              WHERE id = :id AND claim_token = :claim_token"
         );
@@ -435,7 +527,9 @@ final class ExportQueueWorker
                     "UPDATE `{$this->queueTable}`
                      SET status = :status,
                          claim_token = NULL,
+                         claimed_at = NULL,
                          available_at = :available_at,
+                         next_retry_at = :available_at,
                          last_error = :last_error
                      WHERE id = :id AND claim_token = :claim_token"
                 );
@@ -456,6 +550,7 @@ final class ExportQueueWorker
             $stmt = $this->stageDb->prepare(
                 "UPDATE `{$this->queueTable}`
                  SET status = :status,
+                     claim_token = NULL,
                      processed_at = NOW(),
                      last_error = :last_error
                  WHERE id = :id AND claim_token = :claim_token"
@@ -529,5 +624,31 @@ final class ExportQueueWorker
             ':state_id' => $entityId,
             ':hash' => $hash,
         ]);
+    }
+
+    private function releaseStaleClaims(): int
+    {
+        $threshold = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+            ->modify('-' . $this->staleClaimSeconds . ' seconds')
+            ->format('Y-m-d H:i:s');
+
+        $stmt = $this->stageDb->prepare(
+            "UPDATE `{$this->queueTable}`
+             SET status = 'pending',
+                 claim_token = NULL,
+                 claimed_at = NULL,
+                 available_at = NOW()
+             WHERE entity_type = :entity_type
+               AND status = 'processing'
+               AND claim_token IS NOT NULL
+               AND claimed_at IS NOT NULL
+               AND claimed_at <= :threshold"
+        );
+        $stmt->execute([
+            ':entity_type' => $this->entityType,
+            ':threshold' => $threshold,
+        ]);
+
+        return $stmt->rowCount();
     }
 }

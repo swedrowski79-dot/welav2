@@ -1,9 +1,15 @@
 COMPOSE = docker compose
 
-.PHONY: up down shell schema-import import-all merge expand
+.PHONY: up up-ramdisk up-persistent down shell schema-import import-all merge expand
 
 up:
 	$(COMPOSE) up -d --build
+
+up-ramdisk:
+	MYSQL_RAMDISK_ENABLED=1 $(COMPOSE) up -d --build
+
+up-persistent:
+	MYSQL_RAMDISK_ENABLED=0 $(COMPOSE) up -d --build
 
 down:
 	$(COMPOSE) down

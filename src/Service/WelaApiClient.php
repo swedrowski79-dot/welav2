@@ -6,9 +6,11 @@ final class WelaApiClient
 {
     public function __construct(
         private string $baseUrl,
-        private string $apiKey
+        private string $apiKey,
+        private int $timeoutSeconds = 30
     ) {
         $this->baseUrl = rtrim(trim($this->baseUrl), '/');
+        $this->timeoutSeconds = max(1, $this->timeoutSeconds);
     }
 
     public function isConfigured(): bool
@@ -65,7 +67,7 @@ final class WelaApiClient
         ];
     }
 
-    public function upsertRow(string $table, array $identity, array $columns, string $primaryKey): array
+    public function upsertRow(string $table, array $identity, array $columns, string|array $primaryKey): array
     {
         $response = $this->request('upsert_row', [
             'table' => $table,
@@ -111,6 +113,88 @@ final class WelaApiClient
         return $data;
     }
 
+    public function syncProductsBatch(array $items): array
+    {
+        $response = $this->request('sync_products_batch', [
+            'items' => array_values($items),
+        ]);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Produkt-Batch-Ergebnis.');
+        }
+
+        return $data;
+    }
+
+    public function syncCategory(array $payload): array
+    {
+        $response = $this->request('sync_category', $payload);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Kategorie-Sync-Ergebnis.');
+        }
+
+        return $data;
+    }
+
+    public function refreshShopState(): array
+    {
+        $response = $this->request('refresh_shop_state', []);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Shop-Refresh-Ergebnis.');
+        }
+
+        return $data;
+    }
+
+    public function uploadDocumentFile(string $fileName, string $contentBase64): array
+    {
+        return $this->uploadDocumentFileToPath($fileName, $contentBase64, null);
+    }
+
+    public function uploadDocumentFileToPath(string $fileName, string $contentBase64, ?string $targetPath): array
+    {
+        $payload = [
+            'file_name' => $fileName,
+            'content_base64' => $contentBase64,
+        ];
+
+        if (is_string($targetPath) && trim($targetPath) !== '') {
+            $payload['target_path'] = trim($targetPath);
+        }
+
+        $response = $this->request('upload_document_file', $payload);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Dokument-Upload-Ergebnis.');
+        }
+
+        return $data;
+    }
+
+    public function browseServerDirectories(?string $path = null): array
+    {
+        $payload = [];
+
+        if (is_string($path) && trim($path) !== '') {
+            $payload['path'] = trim($path);
+        }
+
+        $response = $this->request('browse_server_directories', $payload);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Browse-Ergebnis.');
+        }
+
+        return $data;
+    }
+
     private function request(string $action, array $body): array
     {
         if (!$this->isConfigured()) {
@@ -129,7 +213,7 @@ final class WelaApiClient
             'http' => [
                 'method' => 'POST',
                 'ignore_errors' => true,
-                'timeout' => 30,
+                'timeout' => $this->timeoutSeconds,
                 'header' => implode("\r\n", [
                     'Content-Type: application/json',
                     'Accept: application/json',

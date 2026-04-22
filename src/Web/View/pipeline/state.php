@@ -4,7 +4,7 @@
     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-end">
         <div>
             <h2 class="h5 mb-1">Export States</h2>
-            <div class="text-secondary small">Persistenter Delta-Zustand fuer Produkte, Medien und Dokumente mit letztem Hash und letzter Sichtung.</div>
+            <div class="text-secondary small">Persistenter Delta-Zustand fuer die konfigurierten Export-Entity-Typen mit letztem Hash und letzter Sichtung.</div>
         </div>
         <a class="btn btn-outline-secondary" href="/pipeline">Zurueck zu Pipeline & Queue</a>
     </div>
@@ -37,7 +37,7 @@
             <label class="form-label">Entity Type</label>
             <select class="form-select" name="entity_type">
                 <option value="">Alle</option>
-                <?php foreach (['product', 'media', 'document'] as $entityType): ?>
+                <?php foreach ($entityTypes as $entityType): ?>
                     <option value="<?= Html::escape($entityType) ?>" <?= $filters['entity_type'] === $entityType ? 'selected' : '' ?>><?= Html::escape($entityType) ?></option>
                 <?php endforeach; ?>
             </select>

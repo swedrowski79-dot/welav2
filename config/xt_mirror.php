@@ -3,7 +3,7 @@
 return [
     'mirror' => [
         'xt_products' => [
-            'table' => 'xt_products',
+            'source_table' => 'xt_products',
             'mirror_table' => 'xt_mirror_products',
             'key' => 'products_id',
             'fields' => [
@@ -15,7 +15,7 @@ return [
         ],
 
         'xt_products_description' => [
-            'table' => 'xt_products_description',
+            'source_table' => 'xt_products_description',
             'mirror_table' => 'xt_mirror_products_description',
             'key' => ['products_id', 'language_code'],
             'fields' => [
@@ -25,7 +25,7 @@ return [
         ],
 
         'xt_categories' => [
-            'table' => 'xt_categories',
+            'source_table' => 'xt_categories',
             'mirror_table' => 'xt_mirror_categories',
             'key' => 'categories_id',
             'fields' => [
@@ -36,7 +36,7 @@ return [
         ],
 
         'xt_categories_description' => [
-            'table' => 'xt_categories_description',
+            'source_table' => 'xt_categories_description',
             'mirror_table' => 'xt_mirror_categories_description',
             'key' => ['categories_id', 'language_code'],
             'fields' => [
@@ -46,14 +46,14 @@ return [
         ],
 
         'xt_products_to_categories' => [
-            'table' => 'xt_products_to_categories',
+            'source_table' => 'xt_products_to_categories',
             'mirror_table' => 'xt_mirror_products_to_categories',
             'key' => ['products_id', 'categories_id'],
             'fields' => ['products_id', 'categories_id', 'master_link', 'store_id'],
         ],
 
         'xt_media' => [
-            'table' => 'xt_media',
+            'source_table' => 'xt_media',
             'mirror_table' => 'xt_mirror_media',
             'key' => 'id',
             'fields' => [
@@ -63,14 +63,14 @@ return [
         ],
 
         'xt_media_link' => [
-            'table' => 'xt_media_link',
+            'source_table' => 'xt_media_link',
             'mirror_table' => 'xt_mirror_media_link',
             'key' => 'ml_id',
             'fields' => ['ml_id', 'm_id', 'link_id', 'class', 'type', 'sort_order'],
         ],
 
         'xt_plg_products_attributes' => [
-            'table' => 'xt_plg_products_attributes',
+            'source_table' => 'xt_plg_products_attributes',
             'mirror_table' => 'xt_mirror_plg_products_attributes',
             'key' => 'attributes_id',
             'fields' => [
@@ -79,21 +79,21 @@ return [
         ],
 
         'xt_plg_products_attributes_description' => [
-            'table' => 'xt_plg_products_attributes_description',
+            'source_table' => 'xt_plg_products_attributes_description',
             'mirror_table' => 'xt_mirror_plg_products_attributes_description',
             'key' => ['attributes_id', 'language_code'],
             'fields' => ['attributes_id', 'language_code', 'attributes_name', 'attributes_desc'],
         ],
 
         'xt_plg_products_to_attributes' => [
-            'table' => 'xt_plg_products_to_attributes',
+            'source_table' => 'xt_plg_products_to_attributes',
             'mirror_table' => 'xt_mirror_plg_products_to_attributes',
             'key' => ['products_id', 'attributes_id'],
             'fields' => ['products_id', 'attributes_id', 'attributes_parent_id'],
         ],
 
         'xt_seo_url' => [
-            'table' => 'xt_seo_url',
+            'source_table' => 'xt_seo_url',
             'mirror_table' => 'xt_mirror_seo_url',
             'key' => ['link_type', 'link_id', 'language_code', 'store_id'],
             'fields' => [

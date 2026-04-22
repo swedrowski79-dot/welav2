@@ -52,32 +52,50 @@ $metricCards = [
         </div>
     </div>
     <div class="col-12 col-xl-4">
-        <div class="panel-card p-4 mb-4">
-            <h2 class="h5 mb-3">Letzter erfolgreicher Lauf</h2>
-            <?php if ($lastSuccessfulRun): ?>
-                <div class="fw-semibold mb-1"><?= Html::escape($lastSuccessfulRun['run_type']) ?></div>
-                <div class="text-secondary mb-2"><?= Html::escape($lastSuccessfulRun['ended_at'] ?? '-') ?></div>
-                <span class="badge <?= Html::badgeClass($lastSuccessfulRun['status']) ?>"><?= Html::escape($lastSuccessfulRun['status']) ?></span>
-            <?php else: ?>
-                <div class="text-secondary">Noch kein erfolgreicher Lauf vorhanden.</div>
-            <?php endif; ?>
-        </div>
         <div class="panel-card p-4">
-            <h2 class="h5 mb-3">Letzter Fehler</h2>
-            <?php if ($lastError): ?>
-                <div class="fw-semibold mb-2"><?= Html::escape($lastError['message']) ?></div>
-                <div class="text-secondary small mb-2"><?= Html::escape($lastError['created_at']) ?></div>
-                <a class="btn btn-sm btn-outline-danger" href="/errors/show?id=<?= Html::escape($lastError['id']) ?>">Detail</a>
-            <?php else: ?>
-                <div class="text-secondary">Keine Fehler protokolliert.</div>
-            <?php endif; ?>
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-4">
+                <div>
+                    <h2 class="h5 mb-1">Schnellzugriff</h2>
+                    <div class="small text-secondary">Die wichtigsten Einstiege fuer Betrieb und Kontrolle.</div>
+                </div>
+                <?php if ($lastSuccessfulRun): ?>
+                    <span class="badge <?= Html::badgeClass($lastSuccessfulRun['status']) ?>"><?= Html::escape($lastSuccessfulRun['status']) ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="d-grid gap-2 mb-4">
+                <a class="btn btn-primary" href="/pipeline">Pipeline & Queue</a>
+                <a class="btn btn-outline-primary" href="/status">Konfiguration & Status</a>
+                <a class="btn btn-outline-primary" href="/document-files">Dokument-Dateien</a>
+            </div>
+            <div class="border rounded-4 p-3 bg-light-subtle mb-3">
+                <div class="small text-secondary mb-1">Letzter erfolgreicher Lauf</div>
+                <?php if ($lastSuccessfulRun): ?>
+                    <div class="fw-semibold mb-1"><?= Html::escape($lastSuccessfulRun['run_type']) ?></div>
+                    <div class="small text-secondary"><?= Html::escape($lastSuccessfulRun['ended_at'] ?? '-') ?></div>
+                <?php else: ?>
+                    <div class="text-secondary small">Noch kein erfolgreicher Lauf vorhanden.</div>
+                <?php endif; ?>
+            </div>
+            <div class="border rounded-4 p-3 bg-light-subtle">
+                <div class="small text-secondary mb-1">Letzter Fehler</div>
+                <?php if ($lastError): ?>
+                    <div class="fw-semibold mb-2"><?= Html::escape($lastError['message']) ?></div>
+                    <div class="text-secondary small mb-2"><?= Html::escape($lastError['created_at']) ?></div>
+                    <a class="btn btn-sm btn-outline-danger" href="/errors/show?id=<?= Html::escape($lastError['id']) ?>">Detail</a>
+                <?php else: ?>
+                    <div class="text-secondary small">Keine Fehler protokolliert.</div>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 </div>
 
 <div class="panel-card p-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Status der Datenquellen</h2>
+        <div>
+            <h2 class="h5 mb-0">Status der Datenquellen</h2>
+            <div class="small text-secondary mt-1">Kompakter Live-Ueberblick ueber Erreichbarkeit und Grundzustand.</div>
+        </div>
         <a class="btn btn-sm btn-outline-secondary" href="/status">Mehr Details</a>
     </div>
     <div class="row g-3">

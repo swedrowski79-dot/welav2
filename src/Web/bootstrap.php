@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../Database/ConnectionFactory.php';
 require_once __DIR__ . '/../Service/PipelineConfig.php';
+require_once __DIR__ . '/../Service/WelaApiClient.php';
 
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\Web\\';

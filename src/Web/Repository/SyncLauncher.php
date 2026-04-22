@@ -6,9 +6,17 @@ namespace App\Web\Repository;
 
 final class SyncLauncher
 {
-    public function launch(string $job): void
+    public function launch(string $job, array $options = []): void
     {
         $command = \PipelineConfig::command($job);
+
+        if ($job === 'export_queue_worker') {
+            $batchSize = max(0, (int) ($options['batch_size'] ?? 0));
+
+            if ($batchSize > 0) {
+                $command .= ' ' . escapeshellarg((string) $batchSize);
+            }
+        }
 
         $logFile = '/tmp/' . $job . '.log';
         $shellCommand = sprintf(

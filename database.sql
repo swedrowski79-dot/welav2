@@ -14,6 +14,14 @@ CREATE TABLE IF NOT EXISTS raw_afs_articles (
     tax_rate DECIMAL(10,4) NULL,
     min_qty DECIMAL(18,4) NULL,
     variant_flag VARCHAR(255) NULL,
+    attribute_name1 VARCHAR(255) NULL,
+    attribute_name2 VARCHAR(255) NULL,
+    attribute_name3 VARCHAR(255) NULL,
+    attribute_name4 VARCHAR(255) NULL,
+    attribute_value1 VARCHAR(255) NULL,
+    attribute_value2 VARCHAR(255) NULL,
+    attribute_value3 VARCHAR(255) NULL,
+    attribute_value4 VARCHAR(255) NULL,
     unit VARCHAR(255) NULL,
     online_flag INT NULL,
     image_1 VARCHAR(255) NULL,
@@ -72,6 +80,7 @@ CREATE TABLE IF NOT EXISTS raw_extra_article_translations (
     language_code VARCHAR(10) NULL,
     language_code_normalized VARCHAR(10) NULL,
     name VARCHAR(255) NULL,
+    intro_text MEDIUMTEXT NULL,
     description MEDIUMTEXT NULL,
     technical_data_html MEDIUMTEXT NULL,
     attribute_name1 VARCHAR(255) NULL,
@@ -90,6 +99,28 @@ CREATE TABLE IF NOT EXISTS raw_extra_article_translations (
     KEY idx_raw_extra_article_translations_lang (language_code_normalized)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS raw_extra_attribute_translations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    row_id BIGINT NULL,
+    afs_artikel_id INT NULL,
+    sku VARCHAR(255) NULL,
+    sort_order INT NULL,
+    attribute_name VARCHAR(255) NULL,
+    attribute_value VARCHAR(255) NULL,
+    language_code VARCHAR(10) NULL,
+    language_code_normalized VARCHAR(10) NULL,
+    source_directory VARCHAR(255) NULL,
+    translated_name VARCHAR(255) NULL,
+    translated_value VARCHAR(255) NULL,
+    is_auto_generated TINYINT NULL,
+    translation_source VARCHAR(50) NULL,
+    KEY idx_raw_extra_attribute_translations_afs_artikel_id (afs_artikel_id),
+    KEY idx_raw_extra_attribute_translations_sku (sku),
+    KEY idx_raw_extra_attribute_translations_name (attribute_name),
+    KEY idx_raw_extra_attribute_translations_lang (language_code_normalized),
+    KEY idx_raw_extra_attribute_translations_name_lang (attribute_name, attribute_value, language_code_normalized)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS raw_extra_category_translations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     row_id INT NULL,
@@ -102,6 +133,89 @@ CREATE TABLE IF NOT EXISTS raw_extra_category_translations (
     meta_description MEDIUMTEXT NULL,
     KEY idx_raw_extra_category_translations_afs_wg_id (afs_wg_id),
     KEY idx_raw_extra_category_translations_lang (language_code_normalized)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE DATABASE IF NOT EXISTS afs_extras CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON afs_extras.* TO 'stage'@'%';
+FLUSH PRIVILEGES;
+
+CREATE TABLE IF NOT EXISTS afs_extras.article_translations (
+    id INT NOT NULL PRIMARY KEY,
+    artikel_id INT NULL,
+    article_number VARCHAR(255) NULL,
+    master_article_number VARCHAR(255) NULL,
+    language VARCHAR(10) NULL,
+    article_name VARCHAR(255) NULL,
+    intro_text MEDIUMTEXT NULL,
+    description MEDIUMTEXT NULL,
+    technical_data_html MEDIUMTEXT NULL,
+    attribute_name1 VARCHAR(255) NULL,
+    attribute_name2 VARCHAR(255) NULL,
+    attribute_name3 VARCHAR(255) NULL,
+    attribute_name4 VARCHAR(255) NULL,
+    attribute_value1 VARCHAR(255) NULL,
+    attribute_value2 VARCHAR(255) NULL,
+    attribute_value3 VARCHAR(255) NULL,
+    attribute_value4 VARCHAR(255) NULL,
+    meta_title VARCHAR(255) NULL,
+    meta_description MEDIUMTEXT NULL,
+    is_master TINYINT NULL,
+    source_directory VARCHAR(255) NULL,
+    KEY idx_afs_extras_article_translations_artikel_id (artikel_id),
+    KEY idx_afs_extras_article_translations_language (language),
+    KEY idx_afs_extras_article_translations_article_number (article_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS afs_extras.category_translations (
+    id INT NOT NULL PRIMARY KEY,
+    warengruppen_id INT NULL,
+    original_name VARCHAR(255) NULL,
+    language VARCHAR(10) NULL,
+    translated_name VARCHAR(255) NULL,
+    meta_description MEDIUMTEXT NULL,
+    meta_title VARCHAR(255) NULL,
+    KEY idx_afs_extras_category_translations_warengruppen_id (warengruppen_id),
+    KEY idx_afs_extras_category_translations_language (language)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS afs_extras.attribute_name_translations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    attribute_name VARCHAR(255) NOT NULL,
+    attribute_value VARCHAR(255) NOT NULL DEFAULT '',
+    language VARCHAR(10) NOT NULL,
+    translated_name VARCHAR(255) NULL,
+    translated_value VARCHAR(255) NULL,
+    is_auto_generated TINYINT NOT NULL DEFAULT 1,
+    translation_source VARCHAR(50) NOT NULL DEFAULT 'afs_auto',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_afs_extras_attribute_name_translation (attribute_name, attribute_value, language),
+    KEY idx_afs_extras_attribute_name_translations_language (language),
+    KEY idx_afs_extras_attribute_name_translations_name (attribute_name, attribute_value)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS afs_extras.missing_article_translations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    article_id VARCHAR(255) NOT NULL,
+    article_number VARCHAR(255) NULL,
+    article_name TEXT NULL,
+    language VARCHAR(10) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'missing',
+    detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_afs_extras_missing_article_translation (article_id, language)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS afs_extras.missing_category_translations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    category_id VARCHAR(255) NOT NULL,
+    category_name TEXT NULL,
+    language VARCHAR(10) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'missing',
+    detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_afs_extras_missing_category_translation (category_id, language)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS stage_products (
@@ -126,10 +240,12 @@ CREATE TABLE IF NOT EXISTS stage_products (
     is_slave TINYINT NULL,
     is_standard TINYINT NULL,
     master_sku VARCHAR(255) NULL,
+    master_afs_artikel_id INT NULL,
     online_flag INT NULL,
     hash VARCHAR(64) NULL,
     KEY idx_stage_products_afs_artikel_id (afs_artikel_id),
     KEY idx_stage_products_sku (sku),
+    KEY idx_stage_products_master_afs_artikel_id (master_afs_artikel_id),
     KEY idx_stage_products_hash (hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -169,7 +285,9 @@ CREATE TABLE IF NOT EXISTS stage_categories (
     image VARCHAR(255) NULL,
     header_image VARCHAR(255) NULL,
     online_flag INT NULL,
-    KEY idx_stage_categories_afs_wg_id (afs_wg_id)
+    hash VARCHAR(64) NULL,
+    KEY idx_stage_categories_afs_wg_id (afs_wg_id),
+    KEY idx_stage_categories_hash (hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS stage_category_translations (
@@ -232,6 +350,27 @@ CREATE TABLE IF NOT EXISTS stage_product_documents (
     KEY idx_stage_product_documents_afs_artikel_id (afs_artikel_id),
     KEY idx_stage_product_documents_document_type (document_type),
     KEY idx_stage_product_documents_hash (hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS documents_file (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    reference_count INT NOT NULL DEFAULT 0,
+    local_path VARCHAR(1024) NULL,
+    file_hash VARCHAR(64) NULL,
+    file_size BIGINT NULL,
+    file_created_at DATETIME NULL,
+    file_modified_at DATETIME NULL,
+    upload TINYINT NOT NULL DEFAULT 0,
+    uploaded_at DATETIME NULL,
+    shop_server_path VARCHAR(1024) NULL,
+    last_scan_at DATETIME NULL,
+    last_error TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_documents_file_title (title),
+    KEY idx_documents_file_upload (upload),
+    KEY idx_documents_file_hash (file_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS xt_products_snapshot (
@@ -616,6 +755,13 @@ CREATE TABLE IF NOT EXISTS product_export_state (
     last_exported_hash VARCHAR(64) NULL,
     last_seen_at DATETIME NOT NULL,
     KEY idx_product_export_state_last_seen_at (last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS category_export_state (
+    category_id INT NOT NULL PRIMARY KEY,
+    last_exported_hash VARCHAR(64) NULL,
+    last_seen_at DATETIME NOT NULL,
+    KEY idx_category_export_state_last_seen_at (last_seen_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS product_media_export_state (

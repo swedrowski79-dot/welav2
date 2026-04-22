@@ -41,6 +41,11 @@ final class Request
         return $this->post[$key] ?? $default;
     }
 
+    public function hasPost(string $key): bool
+    {
+        return array_key_exists($key, $this->post);
+    }
+
     public function int(string $key, int $default = 0): int
     {
         return max(0, (int) $this->query($key, $default));

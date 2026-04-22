@@ -30,10 +30,27 @@ $fieldGroups = [
         'STAGE_DB_PASS' => 'Passwort',
         ],
     ],
-    'Extra SQLite' => [
+    'AFS Extras' => [
         'source' => 'extra',
         'fields' => [
+        'EXTRA_DB_HOST' => 'Host',
+        'EXTRA_DB_PORT' => 'Port',
+        'EXTRA_DB_NAME' => 'Datenbank',
+        'EXTRA_DB_USER' => 'Benutzer',
+        'EXTRA_DB_PASS' => 'Passwort',
+        ],
+    ],
+    'SQLite Bootstrap' => [
+        'source' => 'extra_sqlite_bootstrap',
+        'fields' => [
         'EXTRA_SQLITE_PATH' => 'Dateipfad',
+        ],
+    ],
+    'Dokumente' => [
+        'source' => 'xt',
+        'fields' => [
+        'DOCUMENTS_ROOT_PATH' => 'Dokumentenpfad',
+        'XT_DOCUMENTS_TARGET_PATH' => 'Zielpfad im Shop',
         ],
     ],
 ];
@@ -66,7 +83,7 @@ $fieldGroups = [
 </div>
 
 <div class="row g-4">
-    <div class="col-12">
+    <div class="col-12 col-xl-5">
         <div class="panel-card p-4">
             <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
                 <div>
@@ -126,7 +143,7 @@ $fieldGroups = [
             </div>
         </div>
     </div>
-    <div class="col-12 col-xl-6">
+    <div class="col-12 col-xl-7">
         <div class="panel-card p-4 h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2 class="h5 mb-0">Verbindungsdaten bearbeiten</h2>
@@ -147,21 +164,70 @@ $fieldGroups = [
                                             'AFS_DB_NAME', 'XT_DB_NAME', 'STAGE_DB_NAME' => 'database',
                                             'AFS_DB_USER', 'XT_DB_USER', 'STAGE_DB_USER' => 'username',
                                             'AFS_DB_PASS', 'XT_DB_PASS', 'STAGE_DB_PASS' => 'password',
+                                            'EXTRA_DB_HOST' => 'host',
+                                            'EXTRA_DB_PORT' => 'port',
+                                            'EXTRA_DB_NAME' => 'database',
+                                            'EXTRA_DB_USER' => 'username',
+                                            'EXTRA_DB_PASS' => 'password',
                                             'XT_API_URL' => 'url',
                                             'XT_API_KEY' => 'key',
+                                            'XT_DOCUMENTS_TARGET_PATH' => 'path',
                                             'EXTRA_SQLITE_PATH' => 'path',
+                                            'DOCUMENTS_ROOT_PATH' => 'path',
                                         }] ?? '');
                                         $type = str_ends_with($field, '_PASS') || str_ends_with($field, '_KEY') ? 'password' : 'text';
                                         ?>
                                         <div class="col-12 col-md-6">
                                             <label class="form-label" for="<?= Html::escape($field) ?>"><?= Html::escape($label) ?></label>
-                                            <input
-                                                class="form-control"
-                                                id="<?= Html::escape($field) ?>"
-                                                name="<?= Html::escape($field) ?>"
-                                                type="<?= Html::escape($type) ?>"
-                                                value="<?= Html::escape((string) $value) ?>"
-                                            >
+                                            <?php if ($field === 'XT_DOCUMENTS_TARGET_PATH'): ?>
+                                                <div class="input-group">
+                                                    <input
+                                                        class="form-control"
+                                                        id="<?= Html::escape($field) ?>"
+                                                        name="<?= Html::escape($field) ?>"
+                                                        type="<?= Html::escape($type) ?>"
+                                                        value="<?= Html::escape((string) $value) ?>"
+                                                    >
+                                                    <button
+                                                        class="btn btn-outline-secondary"
+                                                        type="button"
+                                                        data-folder-browser-trigger="true"
+                                                        data-browser-endpoint="/status/browse-api-tree"
+                                                        data-browser-input="XT_DOCUMENTS_TARGET_PATH"
+                                                        data-browser-title="Shop-Zielpfad waehlen"
+                                                        data-browser-root=""
+                                                    >Browser</button>
+                                                </div>
+                                                <div class="form-text">Der Browser liest Verzeichnisse direkt ueber die XT-API auf dem Shop-Server.</div>
+                                            <?php elseif ($field === 'DOCUMENTS_ROOT_PATH'): ?>
+                                                <div class="input-group">
+                                                    <input
+                                                        class="form-control"
+                                                        id="<?= Html::escape($field) ?>"
+                                                        name="<?= Html::escape($field) ?>"
+                                                        type="<?= Html::escape($type) ?>"
+                                                        value="<?= Html::escape((string) $value) ?>"
+                                                    >
+                                                    <button
+                                                        class="btn btn-outline-secondary"
+                                                        type="button"
+                                                        data-folder-browser-trigger="true"
+                                                        data-browser-endpoint="/document-files/browse-tree"
+                                                        data-browser-input="DOCUMENTS_ROOT_PATH"
+                                                        data-browser-title="Lokalen Dokumentpfad waehlen"
+                                                        data-browser-root="/"
+                                                    >Browser</button>
+                                                </div>
+                                                <div class="form-text">Der Browser liest Verzeichnisse lokal im Sync-System und laedt Unterordner erst bei Bedarf nach.</div>
+                                            <?php else: ?>
+                                                <input
+                                                    class="form-control"
+                                                    id="<?= Html::escape($field) ?>"
+                                                    name="<?= Html::escape($field) ?>"
+                                                    type="<?= Html::escape($type) ?>"
+                                                    value="<?= Html::escape((string) $value) ?>"
+                                                >
+                                            <?php endif; ?>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
@@ -175,9 +241,14 @@ $fieldGroups = [
             </form>
         </div>
     </div>
-    <div class="col-12 col-xl-6">
-        <div class="panel-card p-0 h-100">
-            <div class="card-header px-4 py-3"><h2 class="h5 mb-0">Freigegebene Admin-Tabellen</h2></div>
+    <div class="col-12">
+        <details class="panel-card details-card" data-open="<?= !empty($errorMessage) ? 'true' : 'false' ?>" <?= !empty($errorMessage) ? 'open' : '' ?>>
+            <summary>
+                <div>
+                    <div class="h5 mb-0">Freigegebene Admin-Tabellen</div>
+                    <div class="small text-secondary mt-1"><?= Html::escape(count($stageCounts)) ?> Tabellen fuer Browser und Admin-Ansichten</div>
+                </div>
+            </summary>
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
                     <thead><tr><th>Label</th><th>Tabelle</th><th>Anzahl</th></tr></thead>
@@ -192,6 +263,6 @@ $fieldGroups = [
                     </tbody>
                 </table>
             </div>
-        </div>
+        </details>
     </div>
 </div>

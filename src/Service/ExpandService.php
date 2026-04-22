@@ -76,6 +76,10 @@ class ExpandService
             return $this->expandAttributeSlots($definitionName, $definition);
         }
 
+        if ($mode === 'attribute_rows') {
+            return $this->expandAttributeRows($definitionName, $definition);
+        }
+
         if ($mode === 'media_slots') {
             return $this->expandMediaSlots($definitionName, $definition);
         }
@@ -220,6 +224,84 @@ class ExpandService
         }
 
         return $stats;
+    }
+
+    private function expandAttributeRows(string $definitionName, array $definition): array
+    {
+        $sourceTable = $definition['source'] ?? null;
+        $targetTable = $definition['target'] ?? null;
+
+        if (!is_string($sourceTable) || $sourceTable === '') {
+            throw new RuntimeException("Expand definition '{$definitionName}' is missing a valid source table.");
+        }
+
+        if (!is_string($targetTable) || $targetTable === '') {
+            throw new RuntimeException("Expand definition '{$definitionName}' is missing a valid target table.");
+        }
+
+        $startedAt = microtime(true);
+        $sourceRows = 0;
+        $targetColumns = [
+            'afs_artikel_id',
+            'sku',
+            'language_code',
+            'sort_order',
+            'attribute_name',
+            'attribute_value',
+            'source_directory',
+        ];
+        $rebuiltRowsByScope = [];
+
+        $select = $this->stageDb->query(
+            'SELECT `afs_artikel_id`, `sku`, `sort_order`, `language_code_normalized`, `attribute_name`, `attribute_value`, `source_directory`
+             FROM ' . $this->quoteIdentifier($sourceTable)
+        );
+
+        while ($row = $select->fetch(PDO::FETCH_ASSOC)) {
+            $sourceRows++;
+            $attributeName = $this->normalizeString($row['attribute_name'] ?? null);
+            $attributeValue = $this->normalizeString($row['attribute_value'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code_normalized'] ?? null);
+
+            if ($attributeName === null || $attributeValue === null || $languageCode === null) {
+                continue;
+            }
+
+            $scopeKey = $this->buildScopeKey($row['afs_artikel_id'] ?? null);
+            $rebuiltRowsByScope[$scopeKey] ??= [];
+            $rebuiltRowsByScope[$scopeKey][] = [
+                'afs_artikel_id' => $row['afs_artikel_id'] ?? null,
+                'sku' => $row['sku'] ?? null,
+                'language_code' => $languageCode,
+                'sort_order' => (int) ($row['sort_order'] ?? 0),
+                'attribute_name' => $attributeName,
+                'attribute_value' => $attributeValue,
+                'source_directory' => $row['source_directory'] ?? null,
+            ];
+        }
+
+        $existingRowsByScope = $this->fetchTargetRowsByScope($targetTable, $targetColumns, 'afs_artikel_id');
+        $scopeStats = $this->applyIncrementalRows(
+            $targetTable,
+            'afs_artikel_id',
+            $targetColumns,
+            $rebuiltRowsByScope,
+            $existingRowsByScope
+        );
+
+        return [
+            'mode' => 'attribute_rows',
+            'source_table' => $sourceTable,
+            'target_table' => $targetTable,
+            'source_rows' => $sourceRows,
+            'source_products' => count($rebuiltRowsByScope),
+            'affected_products' => (int) ($scopeStats['affected_scopes'] ?? 0),
+            'unchanged_products' => (int) ($scopeStats['unchanged_scopes'] ?? 0),
+            'deleted_rows' => (int) ($scopeStats['deleted_rows'] ?? 0),
+            'written_rows' => (int) ($scopeStats['written_rows'] ?? 0),
+            'insert_batches' => (int) ($scopeStats['insert_batches'] ?? 0),
+            'duration_seconds' => $this->roundDuration(microtime(true) - $startedAt),
+        ];
     }
 
     private function expandMediaSlots(string $definitionName, array $definition): array

@@ -25,6 +25,12 @@ class ExtraImporter
         $this->importIntoTable($stmt, 'extra.category_translations', 'raw_extra_category_translations');
     }
 
+    public function importAttributeTranslations(): void
+    {
+        $stmt = $this->runEntityQuery('attribute_translations');
+        $this->importIntoTable($stmt, 'extra.attribute_translations', 'raw_extra_attribute_translations');
+    }
+
     private function runEntityQuery(string $entityName): PDOStatement
     {
         $entityConfig = $this->sourceConfig['entities'][$entityName] ?? null;
@@ -74,6 +80,12 @@ class ExtraImporter
 
     private function quoteIdentifier(string $identifier): string
     {
+        $type = (string) ($this->sourceConfig['type'] ?? 'sqlite');
+
+        if ($type === 'mysql') {
+            return '`' . str_replace('`', '``', $identifier) . '`';
+        }
+
         return '"' . str_replace('"', '""', $identifier) . '"';
     }
 }

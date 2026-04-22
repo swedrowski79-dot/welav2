@@ -21,58 +21,57 @@
 <?php endif; ?>
 
 <?php if (!empty($schemaIssues)): ?>
-    <div class="alert alert-danger border-0 shadow-sm mb-4">
-        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+    <details class="panel-card details-card mb-4" open>
+        <summary>
             <div>
-                <div class="fw-semibold mb-2">Schema unvollstaendig</div>
-                <div class="small mb-3">Es fehlen benoetigte Tabellen oder Spalten fuer Stage-, Delta- oder Export-Funktionen. Die Admin-Oberflaeche bleibt verfuegbar, aber betroffene Funktionen koennen fehlschlagen.</div>
-                <ul class="mb-0 ps-3">
-                    <?php foreach ($schemaIssues as $issue): ?>
-                        <li><?= Html::escape($issue['message']) ?></li>
-                    <?php endforeach; ?>
-                </ul>
+                <div class="fw-semibold">Schema unvollstaendig</div>
+                <div class="small text-secondary mt-1"><?= Html::escape(count($schemaIssues)) ?> Hinweis(e) zu Tabellen oder Spalten</div>
             </div>
-            <div class="d-flex flex-column align-items-lg-end gap-2">
-                <div class="small text-danger-emphasis">Migrationen und Systemstatus stehen jetzt unter `Konfiguration/Status`, bevor Delta- oder Queue-Funktionen getestet werden.</div>
-                <a class="btn btn-danger" href="/status">Zu Konfiguration/Status</a>
-            </div>
+        </summary>
+        <div class="p-4">
+            <div class="small mb-3">Es fehlen benoetigte Tabellen oder Spalten fuer Stage-, Delta- oder Export-Funktionen.</div>
+            <ul class="mb-3 ps-3">
+                <?php foreach ($schemaIssues as $issue): ?>
+                    <li><?= Html::escape($issue['message']) ?></li>
+                <?php endforeach; ?>
+            </ul>
+            <a class="btn btn-danger" href="/status">Zu Konfiguration/Status</a>
         </div>
-    </div>
+    </details>
 <?php endif; ?>
 
 <?php if (!empty($consistencyReport['checks'])): ?>
-    <div class="alert alert-warning border-0 shadow-sm mb-4">
-        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
+    <details class="panel-card details-card mb-4">
+        <summary>
             <div>
-                <div class="fw-semibold mb-2">Stage-Konsistenzhinweise</div>
-                <div class="small mb-3">
-                    Es wurden <?= Html::escape($consistencyReport['summary']['issues'] ?? 0) ?> relevante Konsistenzprobleme
-                    mit insgesamt <?= Html::escape($consistencyReport['summary']['affected_rows'] ?? 0) ?> betroffenen Datensaetzen gefunden.
-                    Die Anwendung bleibt nutzbar, aber Delta- und Exportergebnisse koennen unvollstaendig sein.
-                </div>
-                <div class="d-grid gap-2">
-                    <?php foreach ($consistencyReport['checks'] as $check): ?>
-                        <div class="border rounded-4 bg-white p-3">
-                            <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
-                                <div class="fw-semibold"><?= Html::escape($check['name']) ?></div>
-                                <span class="badge <?= Html::badgeClass($check['severity']) ?>"><?= Html::escape($check['count']) ?> betroffen</span>
-                            </div>
-                            <div class="small text-secondary mt-2"><?= Html::escape($check['description']) ?></div>
-                            <?php if (!empty($check['examples'])): ?>
-                                <div class="small mt-2">
-                                    <span class="text-secondary">Beispiele:</span>
-                                    <?= Html::escape(implode(', ', $check['examples'])) ?>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
+                <div class="fw-semibold">Stage-Konsistenzhinweise</div>
+                <div class="small text-secondary mt-1">
+                    <?= Html::escape($consistencyReport['summary']['issues'] ?? 0) ?> Problemtyp(en),
+                    <?= Html::escape($consistencyReport['summary']['affected_rows'] ?? 0) ?> betroffene Datensaetze
                 </div>
             </div>
-            <div class="small text-warning-emphasis">
-                Empfohlener Ablauf: Import oder Merge erneut ausfuehren, anschliessend Stage-Daten und Queue pruefen.
+        </summary>
+        <div class="p-4">
+            <div class="small text-secondary mb-3">Empfohlener Ablauf: Import oder Merge erneut ausfuehren, anschliessend Stage-Daten und Queue pruefen.</div>
+            <div class="d-grid gap-2">
+                <?php foreach ($consistencyReport['checks'] as $check): ?>
+                    <div class="border rounded-4 bg-light-subtle p-3">
+                        <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
+                            <div class="fw-semibold"><?= Html::escape($check['name']) ?></div>
+                            <span class="badge <?= Html::badgeClass($check['severity']) ?>"><?= Html::escape($check['count']) ?> betroffen</span>
+                        </div>
+                        <div class="small text-secondary mt-2"><?= Html::escape($check['description']) ?></div>
+                        <?php if (!empty($check['examples'])): ?>
+                            <div class="small mt-2">
+                                <span class="text-secondary">Beispiele:</span>
+                                <?= Html::escape(implode(', ', $check['examples'])) ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
             </div>
         </div>
-    </div>
+    </details>
 <?php endif; ?>
 
 <div class="row g-4 mb-4">
@@ -81,10 +80,10 @@
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h2 class="h5 mb-1">Pipeline-Steuerung</h2>
-                    <div class="text-secondary small">Die Aktionen sind entlang des aktuellen Pipeline-Flusses gruppiert: Import, Merge, Expand inklusive Delta und anschliessender Export-Worker.</div>
+                    <div class="text-secondary small">Die Aktionen sind entlang des aktuellen Pipeline-Flusses gruppiert: Import, Merge, XT-Mirror, Expand inklusive Delta und anschliessender Export-Worker.</div>
                 </div>
                 <div class="d-flex gap-2">
-                    <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Export States</a>
+                    <a class="btn btn-sm btn-outline-secondary" href="/pipeline/state">Delta-State</a>
                 </div>
             </div>
             <?php foreach ($pipelineSections as $section): ?>
@@ -97,6 +96,19 @@
                                 <div class="border rounded-4 p-3 h-100 bg-white">
                                     <form method="post" action="/pipeline/start" class="mb-2">
                                         <input type="hidden" name="job" value="<?= Html::escape($job['name']) ?>">
+                                        <?php if (in_array(($job['name'] ?? ''), ['export_queue_worker', 'full_pipeline'], true)): ?>
+                                            <label class="form-label small text-secondary" for="batch_size_<?= Html::escape($job['name']) ?>">Export-Worker Batchgroesse</label>
+                                            <input
+                                                class="form-control mb-2"
+                                                id="batch_size_<?= Html::escape($job['name']) ?>"
+                                                name="batch_size"
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                                value="<?= Html::escape($exportWorkerBatchSize ?? '') ?>"
+                                                placeholder="persistenter Wert"
+                                            >
+                                        <?php endif; ?>
                                         <button class="btn <?= Html::escape($job['button_class']) ?> w-100" type="submit"><?= Html::escape($job['label']) ?></button>
                                     </form>
                                     <div class="small text-secondary"><?= Html::escape($job['help']) ?></div>
@@ -240,7 +252,7 @@
 <?php if (!empty($queueSummaryByEntity)): ?>
     <div class="panel-card p-4 mb-4">
         <h2 class="h5 mb-1">Queue nach Entity-Typ</h2>
-        <div class="small text-secondary mb-3">Schneller Ueberblick, ob Delta fuer Produkte, Medien oder Dokumente pending Eintraege erzeugt hat und wie weit der Worker je Entity-Typ gekommen ist.</div>
+        <div class="small text-secondary mb-3">Schneller Ueberblick, ob Delta fuer die konfigurierten Entity-Typen pending Eintraege erzeugt hat und wie weit der Worker je Entity-Typ gekommen ist.</div>
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead><tr><th>Entity</th><th>Pending</th><th>Processing</th><th>Done</th><th>Error</th></tr></thead>
@@ -260,103 +272,89 @@
     </div>
 <?php endif; ?>
 
-<div class="panel-card p-4 mb-4">
-    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">
+<details class="panel-card details-card mb-4" <?= (($queueIssueSummary['total'] ?? 0) > 0 || !empty($recentExportWorkerIssues) || !empty($recentQueueIssues)) ? 'open' : '' ?>>
+    <summary>
         <div>
-            <h2 class="h5 mb-1">XT-/Exportprobleme</h2>
-            <div class="small text-secondary">Retry-faehige XT-Exportfehler und Queue-Eintraege mit `last_error` werden hier getrennt von generischen Pipeline-Logs sichtbar gemacht.</div>
+            <div class="fw-semibold">XT-/Exportprobleme</div>
+            <div class="small text-secondary mt-1">Queue-Probleme <?= Html::escape($queueIssueSummary['total'] ?? 0) ?> · Worker-Warnungen <?= Html::escape(count($recentExportWorkerIssues ?? [])) ?></div>
         </div>
-        <a class="btn btn-sm btn-outline-danger" href="/errors">Zur Fehleransicht</a>
-    </div>
-    <div class="row g-3 mb-3">
-        <div class="col-6 col-md-3">
-            <div class="border rounded-4 p-3 bg-light-subtle">
-                <div class="small text-secondary">Queue-Probleme gesamt</div>
-                <div class="fw-semibold"><?= Html::escape($queueIssueSummary['total'] ?? 0) ?></div>
+    </summary>
+    <div class="p-4">
+        <div class="d-flex justify-content-end mb-3">
+            <a class="btn btn-sm btn-outline-danger" href="/errors">Zur Fehleransicht</a>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+                <div class="border rounded-4 p-3 bg-light-subtle">
+                    <div class="small text-secondary">Queue-Probleme gesamt</div>
+                    <div class="fw-semibold"><?= Html::escape($queueIssueSummary['total'] ?? 0) ?></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="border rounded-4 p-3 bg-light-subtle">
+                    <div class="small text-secondary">Pending mit Fehler</div>
+                    <div class="fw-semibold"><?= Html::escape($queueIssueSummary['pending'] ?? 0) ?></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="border rounded-4 p-3 bg-light-subtle">
+                    <div class="small text-secondary">Error mit Fehler</div>
+                    <div class="fw-semibold"><?= Html::escape($queueIssueSummary['error'] ?? 0) ?></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="border rounded-4 p-3 bg-light-subtle">
+                    <div class="small text-secondary">Worker-Warnungen</div>
+                    <div class="fw-semibold"><?= Html::escape(count($recentExportWorkerIssues ?? [])) ?></div>
+                </div>
             </div>
         </div>
-        <div class="col-6 col-md-3">
-            <div class="border rounded-4 p-3 bg-light-subtle">
-                <div class="small text-secondary">Pending mit Fehler</div>
-                <div class="fw-semibold"><?= Html::escape($queueIssueSummary['pending'] ?? 0) ?></div>
-            </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="border rounded-4 p-3 bg-light-subtle">
-                <div class="small text-secondary">Error mit Fehler</div>
-                <div class="fw-semibold"><?= Html::escape($queueIssueSummary['error'] ?? 0) ?></div>
-            </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="border rounded-4 p-3 bg-light-subtle">
-                <div class="small text-secondary">Worker-Warnungen</div>
-                <div class="fw-semibold"><?= Html::escape(count($recentExportWorkerIssues ?? [])) ?></div>
-            </div>
-        </div>
-    </div>
-    <div class="row g-4">
-        <div class="col-12 col-xl-6">
-            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
-                <div class="fw-semibold mb-2">Letzte Worker-Probleme</div>
-                <?php if (empty($recentExportWorkerIssues)): ?>
-                    <div class="small text-secondary">Keine aktuellen Export-Worker-Warnungen oder -Fehler.</div>
-                <?php else: ?>
-                    <div class="d-grid gap-2">
-                        <?php foreach ($recentExportWorkerIssues as $issue): ?>
-                            <div class="border rounded-3 p-2 bg-white">
-                                <div class="d-flex justify-content-between gap-2">
-                                    <span class="badge <?= Html::badgeClass($issue['level'] ?? 'warning') ?>"><?= Html::escape($issue['level'] ?? 'warning') ?></span>
-                                    <div class="small text-secondary"><?= Html::escape($issue['created_at'] ?? '-') ?></div>
+        <div class="row g-4">
+            <div class="col-12 col-xl-6">
+                <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                    <div class="fw-semibold mb-2">Letzte Worker-Probleme</div>
+                    <?php if (empty($recentExportWorkerIssues)): ?>
+                        <div class="small text-secondary">Keine aktuellen Export-Worker-Warnungen oder -Fehler.</div>
+                    <?php else: ?>
+                        <div class="d-grid gap-2">
+                            <?php foreach ($recentExportWorkerIssues as $issue): ?>
+                                <div class="border rounded-3 p-2 bg-white">
+                                    <div class="d-flex justify-content-between gap-2">
+                                        <span class="badge <?= Html::badgeClass($issue['level'] ?? 'warning') ?>"><?= Html::escape($issue['level'] ?? 'warning') ?></span>
+                                        <div class="small text-secondary"><?= Html::escape($issue['created_at'] ?? '-') ?></div>
+                                    </div>
+                                    <div class="small fw-semibold mt-2"><?= Html::escape($issue['message'] ?? '') ?></div>
+                                    <div class="small text-secondary mt-1 truncate-cell"><code><?= Html::escape($issue['context_json'] ?? '{}') ?></code></div>
                                 </div>
-                                <div class="small fw-semibold mt-2"><?= Html::escape($issue['message'] ?? '') ?></div>
-                                <div class="small text-secondary mt-1 truncate-cell"><code><?= Html::escape($issue['context_json'] ?? '{}') ?></code></div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
             </div>
-        </div>
-        <div class="col-12 col-xl-6">
-            <div class="border rounded-4 p-3 h-100 bg-light-subtle">
-                <div class="fw-semibold mb-2">Letzte Queue-Eintraege mit Fehler</div>
-                <?php if (empty($recentQueueIssues)): ?>
-                    <div class="small text-secondary">Keine Queue-Eintraege mit `last_error` vorhanden.</div>
-                <?php else: ?>
-                    <div class="d-grid gap-2">
-                        <?php foreach ($recentQueueIssues as $issue): ?>
-                            <div class="border rounded-3 p-2 bg-white">
-                                <div class="d-flex justify-content-between gap-2">
-                                    <div class="small fw-semibold"><?= Html::escape(($issue['entity_type'] ?? '-') . ' #' . ($issue['entity_id'] ?? '-')) ?></div>
-                                    <span class="badge <?= Html::badgeClass($issue['status'] ?? 'error') ?>"><?= Html::escape($issue['status'] ?? '-') ?></span>
+            <div class="col-12 col-xl-6">
+                <div class="border rounded-4 p-3 h-100 bg-light-subtle">
+                    <div class="fw-semibold mb-2">Letzte Queue-Eintraege mit Fehler</div>
+                    <?php if (empty($recentQueueIssues)): ?>
+                        <div class="small text-secondary">Keine Queue-Eintraege mit `last_error` vorhanden.</div>
+                    <?php else: ?>
+                        <div class="d-grid gap-2">
+                            <?php foreach ($recentQueueIssues as $issue): ?>
+                                <div class="border rounded-3 p-2 bg-white">
+                                    <div class="d-flex justify-content-between gap-2">
+                                        <div class="small fw-semibold"><?= Html::escape(($issue['entity_type'] ?? '-') . ' #' . ($issue['entity_id'] ?? '-')) ?></div>
+                                        <span class="badge <?= Html::badgeClass($issue['status'] ?? 'error') ?>"><?= Html::escape($issue['status'] ?? '-') ?></span>
+                                    </div>
+                                    <div class="small text-secondary mt-1">Action <?= Html::escape($issue['action'] ?? '-') ?> · Attempts <?= Html::escape($issue['attempt_count'] ?? 0) ?></div>
+                                    <div class="small text-danger mt-2"><?= Html::escape($issue['last_error'] ?? '') ?></div>
                                 </div>
-                                <div class="small text-secondary mt-1">Action <?= Html::escape($issue['action'] ?? '-') ?> · Attempts <?= Html::escape($issue['attempt_count'] ?? 0) ?></div>
-                                <div class="small text-danger mt-2"><?= Html::escape($issue['last_error'] ?? '') ?></div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
             </div>
         </div>
     </div>
-</div>
-
-<div class="panel-card p-4 mb-4">
-    <div class="row g-3">
-        <div class="col-12 col-lg-8">
-            <h2 class="h5 mb-1">Arbeitsansicht fuer Queue und Pipeline</h2>
-            <div class="text-secondary small">Oben stehen Steuerung und aktueller Lauf. Unten folgt die Queue-Ansicht fuer konkrete Exporteintraege, Retries und Fehler.</div>
-        </div>
-        <div class="col-12 col-lg-4">
-            <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
-                <span class="badge <?= Html::badgeClass('pending') ?>">pending</span>
-                <span class="badge <?= Html::badgeClass('running') ?>">processing</span>
-                <span class="badge <?= Html::badgeClass('success') ?>">done</span>
-                <span class="badge <?= Html::badgeClass('error') ?>">error</span>
-            </div>
-            <div class="small text-secondary text-lg-end mt-2">Statusfarben zeigen sofort, ob ein Eintrag wartet, verarbeitet wird, erfolgreich war oder blockiert ist.</div>
-        </div>
-    </div>
-</div>
+</details>
 
 <div class="panel-card p-4 mb-4">
     <div class="d-flex justify-content-between align-items-start mb-3">
@@ -521,7 +519,8 @@
             <?php foreach ([
                 ['action' => 'queue', 'label' => 'Reset Queue', 'warning' => 'Alle Export-Queue-Eintraege werden geloescht. Fortfahren?'],
                 ['action' => 'stage', 'label' => 'Reset Stage', 'warning' => 'Alle stage_* Tabellen werden geleert. Fortfahren?'],
-                ['action' => 'delta_state', 'label' => 'Reset Delta State', 'warning' => 'Der komplette Produkt-Delta-State wird geloescht. Fortfahren?'],
+                ['action' => 'mirror', 'label' => 'Reset Mirror', 'warning' => 'Alle xt_mirror_* Tabellen werden geleert. Fortfahren?'],
+                ['action' => 'delta_state', 'label' => 'Reset Delta State', 'warning' => 'Der komplette Delta-State wird geloescht. Fortfahren?'],
                 ['action' => 'full', 'label' => 'Full Reset', 'warning' => 'Queue, Stage und Delta-State werden komplett zurueckgesetzt. Fortfahren?'],
             ] as $reset): ?>
                 <form method="post" action="/pipeline/reset" onsubmit="return confirm('<?= Html::escape($reset['warning']) ?>');">
@@ -540,9 +539,9 @@
             <label class="form-label">Entity Type</label>
             <select class="form-select" name="entity_type">
                 <option value="">Alle</option>
-                <option value="product" <?= $filters['entity_type'] === 'product' ? 'selected' : '' ?>>product</option>
-                <option value="media" <?= $filters['entity_type'] === 'media' ? 'selected' : '' ?>>media</option>
-                <option value="document" <?= $filters['entity_type'] === 'document' ? 'selected' : '' ?>>document</option>
+                <?php foreach ($entityTypes as $entityType): ?>
+                    <option value="<?= Html::escape($entityType) ?>" <?= $filters['entity_type'] === $entityType ? 'selected' : '' ?>><?= Html::escape($entityType) ?></option>
+                <?php endforeach; ?>
             </select>
         </div>
         <div class="col-12 col-md-3">

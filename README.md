@@ -3,7 +3,7 @@
 Dieses Projekt synchronisiert Daten aus:
 
 - AFS (MSSQL)
-- Extra-Datenbank (SQLite, mehrsprachige Inhalte)
+- Extra-Datenbank `afs_extras` (MySQL, mehrsprachige Inhalte)
 
 in eine Stage-Datenbank (MySQL).
 
@@ -76,9 +76,9 @@ Beispiel:
 
 ---
 
-## SQLite Besonderheiten
+## AFS Extras
 
-Tabellen:
+Quelltabellen:
 
 - `articles`
 - `warengruppen`
@@ -88,6 +88,12 @@ Merkmale:
 - Inhalte sind **zeilenbasiert pro Sprache**
 - Sprache wird normalisiert auf:
   - `de`, `en`, `fr`, `nl`
+
+Die Befuellung von `afs_extras` aus der alten SQLite-Datei erfolgt separat ueber:
+
+```bash
+docker compose exec php php run_sync_afs_extras.php
+```
 
 ---
 
@@ -139,6 +145,33 @@ Start:
 docker compose up -d --build
 ```
 
+Standardstart mit MySQL auf RAM-Disk:
+
+```bash
+docker compose up -d --build
+```
+
+oder:
+
+```bash
+make up-ramdisk
+```
+
+Optional mit eigener Groesse:
+
+```bash
+MYSQL_RAMDISK_SIZE_BYTES=10737418240 docker compose up -d --build
+```
+
+Hinweis:
+
+- Der Container kopiert beim Start die persistente MySQL-Datenbank aus `mysql_data` nach `/mnt/mysql-ram` auf `tmpfs`.
+- Die RAM-Disk wird unter `/mnt/mysql-ram` eingehängt.
+- Die Default-Groesse ist `8589934592` Bytes (8 GiB) und muss groesser als der aktuelle Inhalt von `mysql_data` sein.
+- MySQL läuft in diesem Modus vollständig auf der RAM-Disk.
+- Dieser Modus ist weiterhin nur fuer Tests gedacht; Aenderungen waehrend des Laufs werden nicht automatisch zurueck auf die persistente Datenablage synchronisiert.
+- Zur Rueckkehr in den Normalmodus den MySQL-Container explizit mit `MYSQL_RAMDISK_ENABLED=0` neu starten oder `make up-persistent` verwenden.
+
 Dashboard:
 
 ```text
@@ -158,7 +191,12 @@ http://localhost:8080
 - `STAGE_DB_NAME`
 - `STAGE_DB_USER`
 - `STAGE_DB_PASS`
-- `EXTRA_SQLITE_PATH`
+- `EXTRA_DB_HOST`
+- `EXTRA_DB_PORT`
+- `EXTRA_DB_NAME`
+- `EXTRA_DB_USER`
+- `EXTRA_DB_PASS`
+- `EXTRA_SQLITE_PATH` (nur fuer Bootstrap aus Alt-SQLite)
 
 ---
 

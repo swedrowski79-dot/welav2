@@ -6,6 +6,10 @@ namespace App\Web\Repository;
 
 final class SchemaHealthRepository
 {
+    public function __construct(private array $deltaConfig = [])
+    {
+    }
+
     /**
      * @return list<array{type:string, table:string, column:?string, message:string}>
      */
@@ -53,8 +57,16 @@ final class SchemaHealthRepository
             'stage_product_documents' => [
                 'hash',
             ],
+            'stage_categories' => [
+                'hash',
+            ],
             'product_export_state' => [
                 'product_id',
+                'last_exported_hash',
+                'last_seen_at',
+            ],
+            'category_export_state' => [
+                'category_id',
                 'last_exported_hash',
                 'last_seen_at',
             ],

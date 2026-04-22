@@ -38,8 +38,8 @@ return [
                 'button_class' => 'btn-outline-secondary',
                 'help' => 'Erzeugt expandierte Stage-Daten und startet im selben Lauf die Delta-Berechnung.',
             ],
-            'xt_snapshot' => [
-                'script' => 'run_xt_snapshot.php',
+            'xt_mirror' => [
+                'script' => 'run_xt_mirror.php',
                 'label' => 'XT Mirror Refresh',
                 'run_type_label' => 'XT Mirror Refresh',
                 'button_class' => 'btn-outline-info',
@@ -59,19 +59,20 @@ return [
                 'button_class' => 'btn-outline-dark',
                 'help' => 'Verarbeitet Queue-Eintraege, schreibt in XT und bestaetigt danach den Export-Status.',
             ],
-            'full_pipeline' => [
-                'script' => 'run_full_pipeline.php',
-                'label' => 'Full Pipeline',
-                'run_type_label' => 'Full Pipeline inkl. Export',
-                'button_class' => 'btn-dark',
-                'help' => 'Startet Import, Merge, Expand inklusive Delta und anschliessend den Export Worker.',
-                'sequence' => [
-                    'import_all',
-                    'merge',
-                    'expand',
-                    'export_queue_worker',
-                ],
-            ],
+             'full_pipeline' => [
+                 'script' => 'run_full_pipeline.php',
+                 'label' => 'Full Pipeline',
+                 'run_type_label' => 'Full Pipeline inkl. Export',
+                 'button_class' => 'btn-dark',
+                 'help' => 'Startet Import, Merge, XT Mirror, Expand inklusive Delta und anschliessend den Export Worker.',
+                 'sequence' => [
+                     'import_all',
+                     'merge',
+                     'xt_mirror',
+                     'expand',
+                     'export_queue_worker',
+                 ],
+             ],
         ],
         'sections' => [
             [
@@ -95,7 +96,7 @@ return [
                 'title' => '3. XT Mirror',
                 'description' => 'Liest den aktuellen XT-Zustand in die lokalen Mirror-Tabellen fuer Abgleich und Analyse.',
                 'jobs' => [
-                    'xt_snapshot',
+                    'xt_mirror',
                 ],
             ],
             [
@@ -116,6 +117,7 @@ return [
         ],
         'run_type_labels' => [
             'delta_products' => 'Delta',
+            'xt_snapshot' => 'XT Mirror Refresh',
         ],
     ],
 ];

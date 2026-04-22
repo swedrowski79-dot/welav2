@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-final class XtCompositeWriter implements XtQueueWriter
+final class XtCompositeWriter implements XtBatchQueueWriter
 {
     /**
      * @param XtQueueWriter[] $writers
@@ -34,5 +34,33 @@ final class XtCompositeWriter implements XtQueueWriter
 
             return;
         }
+    }
+
+    public function supportsBatch(string $entityType): bool
+    {
+        foreach ($this->writers as $writer) {
+            if (!$writer instanceof XtBatchQueueWriter) {
+                continue;
+            }
+
+            if ($writer->supportsBatch($entityType)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function writeBatch(string $entityType, array $entries): array
+    {
+        foreach ($this->writers as $writer) {
+            if (!$writer instanceof XtBatchQueueWriter || !$writer->supportsBatch($entityType)) {
+                continue;
+            }
+
+            return $writer->writeBatch($entityType, $entries);
+        }
+
+        throw new RuntimeException("Kein Batch-Writer fuer Entity-Typ '{$entityType}' verfuegbar.");
     }
 }

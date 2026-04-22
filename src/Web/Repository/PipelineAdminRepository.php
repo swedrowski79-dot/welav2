@@ -327,7 +327,10 @@ final class PipelineAdminRepository
 
     public function resetDeltaState(): void
     {
-        $tables = ['product_export_state', 'product_media_export_state', 'product_document_export_state'];
+        $tables = array_values(array_unique(array_map(
+            static fn (array $definition): string => $definition['table'],
+            $this->stateDefinitions()
+        )));
 
         foreach ($tables as $table) {
             try {
@@ -342,6 +345,21 @@ final class PipelineAdminRepository
         $this->logAdminAction('Export States wurden geleert.', [
             'action' => 'reset_delta_state',
             'tables' => $tables,
+        ], 'warning');
+    }
+
+    public function resetMirrorTables(): void
+    {
+        $tables = $this->mirrorTables();
+
+        foreach ($tables as $table) {
+            $this->stageDb->exec("TRUNCATE TABLE `{$table}`");
+        }
+
+        $this->logAdminAction('XT-Mirror-Tabellen wurden geleert.', [
+            'action' => 'reset_mirror',
+            'tables' => $tables,
+            'table_count' => count($tables),
         ], 'warning');
     }
 
@@ -480,6 +498,14 @@ final class PipelineAdminRepository
         ));
     }
 
+    public function entityTypes(): array
+    {
+        return array_values(array_map(
+            static fn (array $definition): string => $definition['entity_type'],
+            $this->stateDefinitions()
+        ));
+    }
+
     private function stateDefinitions(): array
     {
         $configKeys = $this->deltaConfig['export_queue_entities'] ?? [];
@@ -556,6 +582,16 @@ final class PipelineAdminRepository
         return array_values(array_filter(
             array_keys($tables),
             static fn (string $table): bool => str_starts_with($table, 'raw_')
+        ));
+    }
+
+    private function mirrorTables(): array
+    {
+        $tables = $this->adminConfig['stage_tables'] ?? [];
+
+        return array_values(array_filter(
+            array_keys($tables),
+            static fn (string $table): bool => str_starts_with($table, 'xt_mirror_')
         ));
     }
 

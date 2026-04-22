@@ -21,13 +21,12 @@ class ProductDeltaService
     private array $payloadFields;
     private array $removedPayload;
     private string $monitorSource;
-    private ?string $snapshotTable = null;
-    private ?string $snapshotIdentityField = null;
-    private array $snapshotCompareFields = [];
-    private ?string $snapshotTranslationHashField = null;
-    private ?string $snapshotAttributeHashField = null;
-    private ?string $snapshotSeoHashField = null;
-    private bool $snapshotRequireSuccessRun = true;
+    private array $mirrorCompareFields = [];
+    private ?string $mirrorTranslationHashField = null;
+    private ?string $mirrorAttributeHashField = null;
+    private ?string $mirrorSeoHashField = null;
+    private bool $mirrorRequireSuccessRun = true;
+    private array $entityOrderBy = [];
     private array $pendingQueueEntities = [];
     private array $queuedEntries = [];
 
@@ -55,9 +54,9 @@ class ProductDeltaService
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
         $states = $this->fetchStates();
-        $snapshotContext = $this->fetchSnapshots();
-        $snapshots = $snapshotContext['rows'];
-        $snapshotEnabled = (bool) ($snapshotContext['enabled'] ?? false);
+        $mirrorContext = $this->fetchMirrorRows();
+        $mirrorRows = $mirrorContext['rows'];
+        $mirrorEnabled = (bool) ($mirrorContext['enabled'] ?? false);
         $initialQueueCounts = $this->fetchQueueCounts();
         $this->pendingQueueEntities = $this->fetchExistingQueueEntities();
         $this->queuedEntries = [];
@@ -67,14 +66,15 @@ class ProductDeltaService
             'insert' => 0,
             'update' => 0,
             'removed' => 0,
+            'mirror_live_removed' => 0,
             'unchanged' => 0,
             'deduplicated' => 0,
             'errors' => 0,
-            'snapshot_matched' => 0,
-            'snapshot_missing' => 0,
-            'snapshot_mismatched' => 0,
-            'snapshot_removed_skipped' => 0,
-            'snapshot_enabled' => $snapshotEnabled,
+            'mirror_matched' => 0,
+            'mirror_missing' => 0,
+            'mirror_mismatched' => 0,
+            'mirror_removed_skipped' => 0,
+            'mirror_enabled' => $mirrorEnabled,
         ];
 
         $currentEntityIds = [];
@@ -108,6 +108,7 @@ class ProductDeltaService
             }
 
             $currentEntityIds[$entityId] = true;
+            $sku = $this->normalizeString($entity['sku'] ?? null);
             $stats['processed']++;
 
             try {
@@ -124,19 +125,19 @@ class ProductDeltaService
                 ]);
 
                 $state = $states[$entityId] ?? null;
-                $snapshotDecision = $this->snapshotDecision($entityId, $payloadData, $snapshots[$entityId] ?? null, $snapshotEnabled);
+                $mirrorDecision = $this->mirrorDecision($payloadData, $mirrorRows[$entityId] ?? null, $mirrorEnabled);
 
-                if ($snapshotEnabled) {
-                    if ($snapshotDecision['matched']) {
-                        $stats['snapshot_matched']++;
-                    } elseif ($snapshotDecision['exists']) {
-                        $stats['snapshot_mismatched']++;
+                if ($mirrorEnabled) {
+                    if ($mirrorDecision['matched']) {
+                        $stats['mirror_matched']++;
+                    } elseif ($mirrorDecision['exists']) {
+                        $stats['mirror_mismatched']++;
                     } else {
-                        $stats['snapshot_missing']++;
+                        $stats['mirror_missing']++;
                     }
                 }
 
-                if ($snapshotDecision['matched']) {
+                if ($mirrorDecision['matched']) {
                     $stats['unchanged']++;
                     $syncStateStmt->execute([
                         ':state_id' => $entityId,
@@ -144,7 +145,7 @@ class ProductDeltaService
                         ':last_seen_at' => $runTimestamp,
                     ]);
                 } else {
-                    $action = $this->nextAction($state, $hash, $snapshotDecision);
+                    $action = $this->nextAction($state, $hash, $mirrorDecision);
 
                     if ($action !== null) {
                         if ($this->enqueue($entityId, $action, $payloadData, $hash)) {
@@ -180,13 +181,13 @@ class ProductDeltaService
                 continue;
             }
 
-            if ($snapshotEnabled && !isset($snapshots[$entityId])) {
+            if ($mirrorEnabled && !isset($mirrorRows[$entityId])) {
                 $syncStateStmt->execute([
                     ':state_id' => $entityId,
                     ':hash' => $this->removedHash,
                     ':last_seen_at' => $runTimestamp,
                 ]);
-                $stats['snapshot_removed_skipped']++;
+                $stats['mirror_removed_skipped']++;
                 $stats['unchanged']++;
                 continue;
             }
@@ -212,6 +213,35 @@ class ProductDeltaService
             }
         }
 
+        if (in_array($this->entityType, ['product', 'category'], true) && $mirrorEnabled) {
+            foreach ($this->findMirrorEntityRemovals(
+                $mirrorRows,
+                $currentEntityIds,
+                $states
+            ) as $entityId) {
+                try {
+                    if ($this->enqueueRemovedUpdate($entityId)) {
+                        $syncStateStmt->execute([
+                            ':state_id' => $entityId,
+                            ':hash' => $this->removedHash,
+                            ':last_seen_at' => $runTimestamp,
+                        ]);
+                        $stats['removed']++;
+                        $stats['mirror_live_removed']++;
+                    } else {
+                        $stats['deduplicated']++;
+                    }
+                } catch (Throwable $exception) {
+                    $stats['errors']++;
+                    $this->logRecordError(
+                        $entityId,
+                        "{$this->entityLabel}-Mirror-Entfernung konnte nicht in die Export Queue geschrieben werden.",
+                        $exception
+                    );
+                }
+            }
+        }
+
         $this->flushQueuedEntries();
         $finalQueueCounts = $this->fetchQueueCounts();
         $stats['changed'] = $stats['insert'] + $stats['update'] + $stats['removed'];
@@ -234,11 +264,12 @@ class ProductDeltaService
                 'removed' => $stats['removed'],
                 'deduplicated' => $stats['deduplicated'],
                 'errors' => $stats['errors'],
-                'snapshot_enabled' => $stats['snapshot_enabled'],
-                'snapshot_matched' => $stats['snapshot_matched'],
-                'snapshot_missing' => $stats['snapshot_missing'],
-                'snapshot_mismatched' => $stats['snapshot_mismatched'],
-                'snapshot_removed_skipped' => $stats['snapshot_removed_skipped'],
+                'mirror_enabled' => $stats['mirror_enabled'],
+                'mirror_matched' => $stats['mirror_matched'],
+                'mirror_missing' => $stats['mirror_missing'],
+                'mirror_mismatched' => $stats['mirror_mismatched'],
+                'mirror_removed_skipped' => $stats['mirror_removed_skipped'],
+                'mirror_live_removed' => $stats['mirror_live_removed'],
                 'pending_before' => $stats['pending_before'],
                 'processing_before' => $stats['processing_before'],
                 'pending_after' => $stats['pending_after'],
@@ -255,11 +286,12 @@ class ProductDeltaService
                 'pending_after' => $stats['pending_after'],
                 'processing_after' => $stats['processing_after'],
                 'deduplicated' => $stats['deduplicated'],
-                'snapshot_enabled' => $stats['snapshot_enabled'],
-                'snapshot_matched' => $stats['snapshot_matched'],
-                'snapshot_missing' => $stats['snapshot_missing'],
-                'snapshot_mismatched' => $stats['snapshot_mismatched'],
-                'snapshot_removed_skipped' => $stats['snapshot_removed_skipped'],
+                'mirror_enabled' => $stats['mirror_enabled'],
+                'mirror_matched' => $stats['mirror_matched'],
+                'mirror_missing' => $stats['mirror_missing'],
+                'mirror_mismatched' => $stats['mirror_mismatched'],
+                'mirror_removed_skipped' => $stats['mirror_removed_skipped'],
+                'mirror_live_removed' => $stats['mirror_live_removed'],
                 'result_reason' => $stats['result_reason'],
             ]);
         }
@@ -292,14 +324,13 @@ class ProductDeltaService
         $this->payloadFields = is_array($config['payload_fields'] ?? null) ? $config['payload_fields'] : [];
         $this->removedPayload = is_array($config['removed_payload'] ?? null) ? $config['removed_payload'] : ['online' => 0];
         $this->monitorSource = (string) ($config['monitor_source'] ?? 'delta_' . $this->entityType);
-        $this->snapshotTable = $this->normalizeTableName($config['snapshot_table'] ?? null);
-        $this->snapshotIdentityField = is_string($config['snapshot_identity_field'] ?? null) ? trim((string) $config['snapshot_identity_field']) : null;
-        $this->snapshotCompareFields = is_array($config['snapshot_compare_fields'] ?? null) ? $config['snapshot_compare_fields'] : [];
-        $this->snapshotTranslationHashField = $this->normalizeFieldName($config['snapshot_translation_hash_field'] ?? null);
-        $this->snapshotAttributeHashField = $this->normalizeFieldName($config['snapshot_attribute_hash_field'] ?? null);
-        $this->snapshotSeoHashField = $this->normalizeFieldName($config['snapshot_seo_hash_field'] ?? null);
-        $this->snapshotRequireSuccessRun = !array_key_exists('snapshot_require_success_run', $config)
-            || (bool) $config['snapshot_require_success_run'];
+        $this->mirrorCompareFields = is_array($config['mirror_compare_fields'] ?? null) ? $config['mirror_compare_fields'] : [];
+        $this->mirrorTranslationHashField = $this->normalizeFieldName($config['mirror_translation_hash_field'] ?? null);
+        $this->mirrorAttributeHashField = $this->normalizeFieldName($config['mirror_attribute_hash_field'] ?? null);
+        $this->mirrorSeoHashField = $this->normalizeFieldName($config['mirror_seo_hash_field'] ?? null);
+        $this->mirrorRequireSuccessRun = !array_key_exists('mirror_require_success_run', $config)
+            || (bool) $config['mirror_require_success_run'];
+        $this->entityOrderBy = $this->normalizeOrderBy($config['entity_order_by'] ?? null);
     }
 
     private function normalizeTableName(mixed $value): ?string
@@ -326,7 +357,7 @@ class ProductDeltaService
 
     private function fetchEntities(): array
     {
-        $stmt = $this->stageDb->query("SELECT * FROM `{$this->stageTable}` ORDER BY `{$this->identityField}` ASC");
+        $stmt = $this->stageDb->query("SELECT * FROM `{$this->stageTable}` ORDER BY {$this->entityOrderBySql()}");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -421,25 +452,28 @@ class ProductDeltaService
         return $states;
     }
 
-    private function fetchSnapshots(): array
+    private function fetchMirrorRows(): array
     {
-        if ($this->snapshotTable === null || $this->snapshotIdentityField === null) {
+        if (!$this->supportsMirrorComparison()) {
             return ['enabled' => false, 'rows' => []];
         }
 
-        if ($this->snapshotRequireSuccessRun && !$this->hasSuccessfulSnapshotRun()) {
+        if ($this->mirrorRequireSuccessRun && !$this->hasSuccessfulMirrorRefreshRun()) {
             return ['enabled' => false, 'rows' => []];
         }
 
         try {
-            $stmt = $this->stageDb->query(
-                "SELECT * FROM `{$this->snapshotTable}` ORDER BY `{$this->snapshotIdentityField}` ASC"
-            );
+            $rows = match ($this->entityType) {
+                'category' => $this->fetchCategoryMirrorRows(),
+                'product' => $this->fetchProductMirrorRows(),
+                'media' => $this->fetchMediaMirrorRows(),
+                'document' => $this->fetchDocumentMirrorRows(),
+                default => [],
+            };
         } catch (Throwable $exception) {
             if ($this->monitor !== null) {
-                $this->monitor->log($this->runId, 'warning', "{$this->entityLabel}-Snapshot konnte nicht gelesen werden.", [
+                $this->monitor->log($this->runId, 'warning', "{$this->entityLabel}-Mirror konnte nicht gelesen werden.", [
                     'entity_type' => $this->entityType,
-                    'table' => $this->snapshotTable,
                     'exception' => $exception->getMessage(),
                 ]);
             }
@@ -447,35 +481,410 @@ class ProductDeltaService
             return ['enabled' => false, 'rows' => []];
         }
 
-        $rows = [];
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $entityId = $this->normalizeEntityId($row[$this->snapshotIdentityField] ?? null);
-            if ($entityId === null) {
-                continue;
-            }
-
-            $rows[$entityId] = $row;
-        }
-
         return ['enabled' => true, 'rows' => $rows];
     }
 
-    private function hasSuccessfulSnapshotRun(): bool
+    private function supportsMirrorComparison(): bool
     {
+        if (!in_array($this->entityType, ['category', 'product', 'media', 'document'], true)) {
+            return false;
+        }
+
+        return $this->mirrorCompareFields !== []
+            || $this->mirrorTranslationHashField !== null
+            || $this->mirrorAttributeHashField !== null
+            || $this->mirrorSeoHashField !== null;
+    }
+
+    private function hasSuccessfulMirrorRefreshRun(): bool
+    {
+        // Accept the old run type so existing successful mirror runs remain valid.
         $stmt = $this->stageDb->prepare(
             "SELECT 1
              FROM `sync_runs`
-             WHERE run_type = :run_type
+             WHERE run_type IN ('xt_mirror', 'xt_snapshot')
                AND status = :status
              ORDER BY id DESC
              LIMIT 1"
         );
         $stmt->execute([
-            ':run_type' => 'xt_snapshot',
             ':status' => 'success',
         ]);
 
         return (bool) $stmt->fetchColumn();
+    }
+
+    private function fetchProductMirrorRows(): array
+    {
+        $categoryMap = $this->fetchProductMirrorCategoryMap();
+        $translationHashes = $this->fetchProductMirrorTranslationHashes();
+        $attributeHashes = $this->fetchProductMirrorAttributeHashes();
+        $seoHashes = $this->fetchProductMirrorSeoHashes();
+
+        $stmt = $this->stageDb->query(
+            "SELECT
+                p.external_id AS entity_id,
+                p.products_id,
+                p.products_model AS sku,
+                p.products_ean AS ean,
+                p.products_quantity AS stock,
+                p.products_price AS price,
+                p.products_weight AS weight,
+                p.products_status AS online_flag,
+                p.products_master_flag AS is_master,
+                p.products_master_model AS master_sku
+             FROM `xt_mirror_products` p
+             WHERE p.external_id IS NOT NULL
+             ORDER BY p.external_id ASC"
+        );
+
+        $rows = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $entityId = $this->normalizeEntityId($row['entity_id'] ?? null);
+            if ($entityId === null) {
+                continue;
+            }
+
+            $productId = $this->normalizeEntityId($row['products_id'] ?? null);
+            $rows[$entityId] = [
+                'sku' => $this->normalizeScalar($row['sku'] ?? null),
+                'ean' => $this->normalizeScalar($row['ean'] ?? null),
+                'stock' => $this->normalizeDecimalValue($row['stock'] ?? null),
+                'price' => $this->normalizeDecimalValue($row['price'] ?? null),
+                'weight' => $this->normalizeDecimalValue($row['weight'] ?? null),
+                'online_flag' => $this->normalizeScalar($row['online_flag'] ?? null),
+                'is_master' => $this->normalizeScalar($row['is_master'] ?? null),
+                'master_sku' => $this->normalizeScalar($row['master_sku'] ?? null),
+                'category_afs_id' => $productId !== null ? ($categoryMap[$productId] ?? null) : null,
+                'translation_hash' => $productId !== null ? ($translationHashes[$productId] ?? null) : null,
+                'attribute_hash' => $productId !== null ? ($attributeHashes[$productId] ?? null) : null,
+                'seo_hash' => $productId !== null ? ($seoHashes[$productId] ?? null) : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function fetchCategoryMirrorRows(): array
+    {
+        $translationHashes = $this->fetchCategoryMirrorTranslationHashes();
+        $seoHashes = $this->fetchCategoryMirrorSeoHashes();
+
+        $stmt = $this->stageDb->query(
+            "SELECT categories_id, external_id, parent_id, categories_image, categories_master_image, categories_status
+             FROM `xt_mirror_categories`
+             WHERE external_id IS NOT NULL
+             ORDER BY categories_id ASC"
+        );
+
+        $categories = [];
+        $externalByXtId = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $categoryId = $this->normalizeEntityId($row['categories_id'] ?? null);
+            $externalId = $this->normalizeEntityId($row['external_id'] ?? null);
+
+            if ($categoryId === null || $externalId === null) {
+                continue;
+            }
+
+            $externalByXtId[$categoryId] = $externalId;
+            $categories[$externalId] = [
+                'xt_category_id' => $categoryId,
+                'parent_xt_id' => $this->normalizeEntityId($row['parent_id'] ?? null),
+                'external_id' => $this->normalizeScalar($row['external_id'] ?? null),
+                'image' => $this->normalizeScalar($row['categories_image'] ?? null),
+                'header_image' => $this->normalizeScalar($row['categories_master_image'] ?? null),
+                'online_flag' => $this->normalizeScalar($row['categories_status'] ?? null),
+                'translation_hash' => $translationHashes[$categoryId] ?? null,
+                'seo_hash' => $seoHashes[$categoryId] ?? null,
+            ];
+        }
+
+        foreach ($categories as &$row) {
+            $parentXtId = $row['parent_xt_id'] ?? null;
+            $row['parent_afs_id'] = $parentXtId !== null ? ($externalByXtId[$parentXtId] ?? null) : null;
+            unset($row['parent_xt_id'], $row['xt_category_id']);
+        }
+        unset($row);
+
+        return $categories;
+    }
+
+    private function fetchProductMirrorCategoryMap(): array
+    {
+        $categoryStmt = $this->stageDb->query(
+            "SELECT categories_id, external_id
+             FROM `xt_mirror_categories`
+             WHERE categories_id IS NOT NULL"
+        );
+
+        $categoryExternalIds = [];
+        while ($row = $categoryStmt->fetch(PDO::FETCH_ASSOC)) {
+            $categoryId = $this->normalizeEntityId($row['categories_id'] ?? null);
+            if ($categoryId === null) {
+                continue;
+            }
+
+            $categoryExternalIds[$categoryId] = $this->normalizeScalar($row['external_id'] ?? null);
+        }
+
+        $linkStmt = $this->stageDb->query(
+            "SELECT products_id, categories_id
+             FROM `xt_mirror_products_to_categories`
+             ORDER BY row_id ASC"
+        );
+
+        $categoryMap = [];
+        while ($row = $linkStmt->fetch(PDO::FETCH_ASSOC)) {
+            $productId = $this->normalizeEntityId($row['products_id'] ?? null);
+            $categoryId = $this->normalizeEntityId($row['categories_id'] ?? null);
+            if ($productId === null || $categoryId === null || array_key_exists($productId, $categoryMap)) {
+                continue;
+            }
+
+            $categoryMap[$productId] = $categoryExternalIds[$categoryId] ?? null;
+        }
+
+        return $categoryMap;
+    }
+
+    private function fetchProductMirrorTranslationHashes(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT products_id, language_code, products_name, products_description, products_short_description
+             FROM `xt_mirror_products_description`
+             ORDER BY products_id ASC, language_code ASC"
+        );
+
+        $grouped = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $productId = $this->normalizeEntityId($row['products_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($productId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $grouped[$productId][] = [
+                'language_code' => $languageCode,
+                'name' => $this->normalizeScalar($row['products_name'] ?? null),
+                'description' => $this->normalizeScalar($row['products_description'] ?? null),
+                'short_description' => $this->normalizeScalar($row['products_short_description'] ?? null),
+            ];
+        }
+
+        return $this->hashGroupedComparableRows($grouped);
+    }
+
+    private function fetchProductMirrorSeoHashes(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT link_id, language_code, meta_title, meta_description
+             FROM `xt_mirror_seo_url`
+             WHERE link_type = 1
+             ORDER BY link_id ASC, language_code ASC"
+        );
+
+        $grouped = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $productId = $this->normalizeEntityId($row['link_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($productId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $grouped[$productId][] = [
+                'language_code' => $languageCode,
+                'meta_title' => $this->normalizeScalar($row['meta_title'] ?? null),
+                'meta_description' => $this->normalizeScalar($row['meta_description'] ?? null),
+            ];
+        }
+
+        return $this->hashGroupedComparableRows($grouped);
+    }
+
+    private function fetchCategoryMirrorTranslationHashes(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT categories_id, language_code, categories_name, categories_description
+             FROM `xt_mirror_categories_description`
+             ORDER BY categories_id ASC, language_code ASC"
+        );
+
+        $grouped = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $categoryId = $this->normalizeEntityId($row['categories_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($categoryId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $grouped[$categoryId][] = [
+                'language_code' => $languageCode,
+                'name' => $this->normalizeScalar($row['categories_name'] ?? null),
+                'description' => $this->normalizeScalar($row['categories_description'] ?? null),
+                'short_description' => null,
+            ];
+        }
+
+        return $this->hashGroupedComparableRows($grouped);
+    }
+
+    private function fetchCategoryMirrorSeoHashes(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT link_id, language_code, meta_title, meta_description
+             FROM `xt_mirror_seo_url`
+             WHERE link_type = 2
+             ORDER BY link_id ASC, language_code ASC"
+        );
+
+        $grouped = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $categoryId = $this->normalizeEntityId($row['link_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($categoryId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $grouped[$categoryId][] = [
+                'language_code' => $languageCode,
+                'meta_title' => $this->normalizeScalar($row['meta_title'] ?? null),
+                'meta_description' => $this->normalizeScalar($row['meta_description'] ?? null),
+            ];
+        }
+
+        return $this->hashGroupedComparableRows($grouped);
+    }
+
+    private function fetchProductMirrorAttributeHashes(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT
+                relation.products_id,
+                child_description.language_code,
+                COALESCE(parent_attribute.sort_order, attribute.sort_order) AS sort_order,
+                parent_description.attributes_name AS parent_attributes_name,
+                child_description.attributes_name AS child_attributes_name,
+                child_description.attributes_desc AS child_attributes_desc
+             FROM `xt_mirror_plg_products_to_attributes` relation
+             INNER JOIN `xt_mirror_plg_products_attributes` attribute
+                ON attribute.attributes_id = relation.attributes_id
+             INNER JOIN `xt_mirror_plg_products_attributes_description` child_description
+                ON child_description.attributes_id = relation.attributes_id
+             LEFT JOIN `xt_mirror_plg_products_attributes` parent_attribute
+                ON parent_attribute.attributes_id = COALESCE(NULLIF(relation.attributes_parent_id, 0), attribute.attributes_parent)
+             LEFT JOIN `xt_mirror_plg_products_attributes_description` parent_description
+                ON parent_description.attributes_id = parent_attribute.attributes_id
+               AND parent_description.language_code = child_description.language_code
+             ORDER BY relation.products_id ASC, child_description.language_code ASC, COALESCE(parent_attribute.sort_order, attribute.sort_order) ASC, relation.attributes_id ASC"
+        );
+
+        $grouped = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $productId = $this->normalizeEntityId($row['products_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($productId === null || $languageCode === null || !in_array($languageCode, ['de', 'en', 'fr', 'nl'], true)) {
+                continue;
+            }
+
+            $attributeName = $this->normalizeScalar($row['parent_attributes_name'] ?? null);
+            $attributeValue = $this->normalizeScalar($row['child_attributes_name'] ?? null);
+
+            if ($attributeName === null && $attributeValue === null) {
+                $attributeName = $this->normalizeScalar($row['child_attributes_name'] ?? null);
+                $attributeValue = $this->normalizeScalar($row['child_attributes_desc'] ?? null);
+            }
+
+            if ($attributeName === null && $attributeValue === null) {
+                continue;
+            }
+
+            $grouped[$productId][] = [
+                'language_code' => $languageCode,
+                'sort_order' => isset($row['sort_order']) ? (int) $row['sort_order'] : null,
+                'attribute_name' => $attributeName,
+                'attribute_value' => $attributeValue,
+            ];
+        }
+
+        return $this->hashGroupedComparableRows($grouped);
+    }
+
+    private function fetchMediaMirrorRows(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT
+                media.external_id AS entity_id,
+                product.external_id AS afs_artikel_id,
+                media.file AS file_name,
+                COALESCE(media.type, link.type) AS media_type,
+                link.sort_order
+             FROM `xt_mirror_media_link` link
+             INNER JOIN `xt_mirror_media` media ON media.id = link.m_id
+             LEFT JOIN `xt_mirror_products` product ON product.products_id = link.link_id
+             WHERE (link.class IS NULL OR link.class = 'product')
+               AND link.type = 'images'
+               AND media.external_id IS NOT NULL
+               AND product.external_id IS NOT NULL
+             ORDER BY media.external_id ASC"
+        );
+
+        $rows = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $entityId = $this->normalizeEntityId($row['entity_id'] ?? null);
+            if ($entityId === null) {
+                continue;
+            }
+
+            $rows[$entityId] = [
+                'media_external_id' => $this->normalizeScalar($row['entity_id'] ?? null),
+                'afs_artikel_id' => $this->normalizeScalar($row['afs_artikel_id'] ?? null),
+                'file_name' => $this->normalizeScalar($row['file_name'] ?? null),
+                'media_type' => $this->normalizeScalar($row['media_type'] ?? null),
+                'sort_order' => $this->normalizeScalar($row['sort_order'] ?? null),
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function fetchDocumentMirrorRows(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT
+                media.external_id AS entity_id,
+                product.external_id AS afs_artikel_id,
+                media.file AS file_name,
+                COALESCE(media.type, link.type) AS document_type,
+                link.sort_order
+             FROM `xt_mirror_media_link` link
+             INNER JOIN `xt_mirror_media` media ON media.id = link.m_id
+             LEFT JOIN `xt_mirror_products` product ON product.products_id = link.link_id
+             WHERE (link.class IS NULL OR link.class = 'product')
+               AND link.type = 'files'
+               AND media.external_id IS NOT NULL
+               AND product.external_id IS NOT NULL
+             ORDER BY media.external_id ASC"
+        );
+
+        $rows = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $entityId = $this->normalizeEntityId($row['entity_id'] ?? null);
+            if ($entityId === null) {
+                continue;
+            }
+
+            $rows[$entityId] = [
+                'afs_document_id' => $this->normalizeScalar($row['entity_id'] ?? null),
+                'afs_artikel_id' => $this->normalizeScalar($row['afs_artikel_id'] ?? null),
+                'file_name' => $this->normalizeScalar($row['file_name'] ?? null),
+                'document_type' => $this->normalizeScalar($row['document_type'] ?? null),
+                'sort_order' => $this->normalizeScalar($row['sort_order'] ?? null),
+            ];
+        }
+
+        return $rows;
     }
 
     private function buildPayloadData(array $entity, array $translations, array $attributes): array
@@ -495,8 +904,10 @@ class ProductDeltaService
             $entityPayload[$field] = $this->normalizeScalar($entity[$field] ?? null);
         }
 
+        $entityPayloadKey = $this->entityType === 'product' ? 'product' : $this->entityType;
+
         return [
-            'product' => $entityPayload,
+            $entityPayloadKey => $entityPayload,
             'translations' => $translations,
             'attributes' => $attributes,
         ];
@@ -512,51 +923,51 @@ class ProductDeltaService
         return hash('sha256', $json);
     }
 
-    private function snapshotDecision(string $entityId, array $payloadData, ?array $snapshotRow, bool $snapshotEnabled): array
+    private function mirrorDecision(array $payloadData, ?array $mirrorRow, bool $mirrorEnabled): array
     {
-        if (!$snapshotEnabled) {
+        if (!$mirrorEnabled) {
             return ['enabled' => false, 'matched' => false, 'exists' => false];
         }
 
-        if ($snapshotRow === null) {
+        if ($mirrorRow === null) {
             return ['enabled' => true, 'matched' => false, 'exists' => false];
         }
 
-        foreach ($this->snapshotCompareFields as $payloadPath => $snapshotField) {
-            if (!is_string($payloadPath) || !is_string($snapshotField)) {
+        foreach ($this->mirrorCompareFields as $payloadPath => $mirrorField) {
+            if (!is_string($payloadPath) || !is_string($mirrorField)) {
                 continue;
             }
 
             $payloadValue = $this->normalizeScalar($this->extractPayloadPath($payloadData, $payloadPath));
-            $snapshotValue = $this->normalizeScalar($snapshotRow[$snapshotField] ?? null);
+            $mirrorValue = $this->normalizeScalar($mirrorRow[$mirrorField] ?? null);
 
-            if (!$this->valuesEqual($payloadValue, $snapshotValue)) {
+            if (!$this->valuesEqual($payloadValue, $mirrorValue)) {
                 return ['enabled' => true, 'matched' => false, 'exists' => true];
             }
         }
 
-        if ($this->snapshotTranslationHashField !== null) {
+        if ($this->mirrorTranslationHashField !== null) {
             if (!$this->valuesEqual(
                 $this->buildStageTranslationHash($payloadData['translations'] ?? []),
-                $this->normalizeScalar($snapshotRow[$this->snapshotTranslationHashField] ?? null)
+                $this->normalizeScalar($mirrorRow[$this->mirrorTranslationHashField] ?? null)
             )) {
                 return ['enabled' => true, 'matched' => false, 'exists' => true];
             }
         }
 
-        if ($this->snapshotAttributeHashField !== null) {
+        if ($this->mirrorAttributeHashField !== null) {
             if (!$this->valuesEqual(
                 $this->buildStageAttributeHash($payloadData['attributes'] ?? []),
-                $this->normalizeScalar($snapshotRow[$this->snapshotAttributeHashField] ?? null)
+                $this->normalizeScalar($mirrorRow[$this->mirrorAttributeHashField] ?? null)
             )) {
                 return ['enabled' => true, 'matched' => false, 'exists' => true];
             }
         }
 
-        if ($this->snapshotSeoHashField !== null) {
+        if ($this->mirrorSeoHashField !== null) {
             if (!$this->valuesEqual(
                 $this->buildStageSeoHash($payloadData['translations'] ?? []),
-                $this->normalizeScalar($snapshotRow[$this->snapshotSeoHashField] ?? null)
+                $this->normalizeScalar($mirrorRow[$this->mirrorSeoHashField] ?? null)
             )) {
                 return ['enabled' => true, 'matched' => false, 'exists' => true];
             }
@@ -565,9 +976,9 @@ class ProductDeltaService
         return ['enabled' => true, 'matched' => true, 'exists' => true];
     }
 
-    private function nextAction(?array $state, string $hash, array $snapshotDecision): ?string
+    private function nextAction(?array $state, string $hash, array $mirrorDecision): ?string
     {
-        if (!(bool) ($snapshotDecision['enabled'] ?? false)) {
+        if (!(bool) ($mirrorDecision['enabled'] ?? false)) {
             if ($state === null) {
                 return 'insert';
             }
@@ -579,7 +990,7 @@ class ProductDeltaService
             return null;
         }
 
-        if (!$snapshotDecision['exists']) {
+        if (!(bool) ($mirrorDecision['exists'] ?? false)) {
             return 'insert';
         }
 
@@ -612,6 +1023,24 @@ class ProductDeltaService
         ];
 
         return $this->scheduleQueueEntry($entityId, 'update', $payload);
+    }
+
+    private function findMirrorEntityRemovals(
+        array $mirrorRows,
+        array $currentEntityIds,
+        array $states
+    ): array {
+        $removals = [];
+
+        foreach ($mirrorRows as $entityId => $mirrorRow) {
+            if (isset($currentEntityIds[$entityId]) || isset($states[$entityId])) {
+                continue;
+            }
+
+            $removals[] = (string) $entityId;
+        }
+
+        return $removals;
     }
 
     private function fetchExistingQueueEntities(): array
@@ -855,12 +1284,35 @@ class ProductDeltaService
             $normalized[] = [
                 'language_code' => $languageCode,
                 'name' => $this->normalizeScalar($translation['name'] ?? null),
-                'description' => $this->normalizeScalar($translation['description'] ?? null),
+                'description' => $this->normalizeScalar($this->combineTranslationDescription(
+                    $translation['description'] ?? null,
+                    $translation['technical_data_html'] ?? null
+                )),
                 'short_description' => $this->normalizeScalar($translation['short_description'] ?? null),
             ];
         }
 
         return $this->hashComparableRows($normalized);
+    }
+
+    private function combineTranslationDescription(mixed $description, mixed $technicalDataHtml): ?string
+    {
+        $parts = [];
+
+        foreach ([$description, $technicalDataHtml] as $value) {
+            $normalized = $this->normalizeScalar($value);
+            if ($normalized === null || $normalized === '') {
+                continue;
+            }
+
+            $parts[] = $normalized;
+        }
+
+        if ($parts === []) {
+            return null;
+        }
+
+        return implode("\n\n", $parts);
     }
 
     private function buildStageSeoHash(mixed $translations): ?string
@@ -934,6 +1386,26 @@ class ProductDeltaService
         return hash('sha256', json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]');
     }
 
+    private function hashGroupedComparableRows(array $groupedRows): array
+    {
+        $hashes = [];
+
+        foreach ($groupedRows as $entityId => $rows) {
+            if (!is_array($rows) || $rows === []) {
+                continue;
+            }
+
+            $hash = $this->hashComparableRows($rows);
+            if ($hash === null) {
+                continue;
+            }
+
+            $hashes[(string) $entityId] = $hash;
+        }
+
+        return $hashes;
+    }
+
     private function valuesEqual(mixed $left, mixed $right): bool
     {
         if ($left === null || $right === null) {
@@ -951,6 +1423,55 @@ class ProductDeltaService
         }
 
         return (string) $normalized;
+    }
+
+    private function normalizeOrderBy(mixed $value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+        $normalized = [];
+
+        foreach ($items as $item) {
+            if (!is_string($item)) {
+                continue;
+            }
+
+            $item = trim($item);
+            if ($item === '') {
+                continue;
+            }
+
+            if (preg_match('/^(?<field>[a-z0-9_]+)(?:\s+(?<direction>ASC|DESC))?$/i', $item, $matches) !== 1) {
+                continue;
+            }
+
+            $direction = strtoupper((string) ($matches['direction'] ?? 'ASC'));
+            $normalized[] = sprintf('`%s` %s', $matches['field'], $direction);
+        }
+
+        return $normalized;
+    }
+
+    private function entityOrderBySql(): string
+    {
+        if ($this->entityOrderBy !== []) {
+            return implode(', ', $this->entityOrderBy);
+        }
+
+        return sprintf('`%s` ASC', $this->identityField);
+    }
+
+    private function normalizeDecimalValue(mixed $value, int $scale = 4): ?string
+    {
+        $normalized = $this->normalizeScalar($value);
+        if ($normalized === null) {
+            return null;
+        }
+
+        if (!is_numeric((string) $normalized)) {
+            return (string) $normalized;
+        }
+
+        return number_format((float) $normalized, $scale, '.', '');
     }
 
     private function normalizeEntityId(mixed $value): ?string
