@@ -202,6 +202,17 @@ http://localhost:8080
 
 ## Schema importieren
 
+Bei einem frischen MySQL-Datadir - insbesondere im Standardbetrieb mit RAM-Disk/tmpfs - wird `database.sql` beim ersten Containerstart automatisch importiert.
+
+Manueller Import ist nur noch noetig, wenn ein bereits initialisierter MySQL-Datadir ohne Anwendungsschema nachtraeglich korrigiert werden soll.
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+oder explizit:
+
 ```bash
 docker compose exec -T mysql mysql -uroot -proot stage_sync < database.sql
 ```

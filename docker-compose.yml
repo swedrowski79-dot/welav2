@@ -49,6 +49,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql-persistent
       - ./docker/mysql:/opt/welav2/mysql:ro
+      - ./database.sql:/docker-entrypoint-initdb.d/20-stage-schema.sql:ro
     tmpfs:
       - /mnt/mysql-ram:size=${MYSQL_RAMDISK_SIZE_BYTES:-8589934592}
     healthcheck:
