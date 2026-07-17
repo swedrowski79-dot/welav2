@@ -180,7 +180,28 @@ final class XtMediaDocumentWriter extends AbstractXtWriter
             throw new RuntimeException('XT-Relation enthaelt keine Produkt-Referenzspalte.');
         }
 
-        $this->resolveExpression($linkExpression, ['stage' => $stageRow], false);
+        try {
+            $this->resolveExpression($linkExpression, ['stage' => $stageRow], false);
+        } catch (PermanentExportQueueException $exception) {
+            if ($this->isMissingXtProductReference($exception, $linkExpression)) {
+                throw new RuntimeException(
+                    'XT-Produkt-Referenz ist noch nicht vorhanden. Dokument-/Medien-Link wird spaeter erneut versucht.',
+                    0,
+                    $exception
+                );
+            }
+
+            throw $exception;
+        }
+    }
+
+    private function isMissingXtProductReference(PermanentExportQueueException $exception, string $linkExpression): bool
+    {
+        if (!str_contains($linkExpression, 'ref:xt_products.')) {
+            return false;
+        }
+
+        return str_contains($exception->getMessage(), "XT-Referenz fuer 'xt_products'");
     }
 
     private function deleteStaleDocumentLinks(string $relationTable, array $stageRow, mixed $currentRelationId): void

@@ -6,7 +6,7 @@ namespace App\Web\Repository;
 
 use App\Web\Core\Paginator;
 
-final class DocumentFileRepository
+final class ImageFileRepository
 {
     public function __construct(private \PDO $stageDb)
     {
@@ -15,9 +15,9 @@ final class DocumentFileRepository
     public function ensureSchema(): void
     {
         $this->stageDb->exec(
-            'CREATE TABLE IF NOT EXISTS `documents_file` (
+            'CREATE TABLE IF NOT EXISTS `images_file` (
                 `id` INT AUTO_INCREMENT PRIMARY KEY,
-                `title` VARCHAR(255) NOT NULL,
+                `file_name` VARCHAR(255) NOT NULL,
                 `reference_count` INT NOT NULL DEFAULT 0,
                 `local_path` VARCHAR(1024) NULL,
                 `file_hash` VARCHAR(64) NULL,
@@ -31,9 +31,9 @@ final class DocumentFileRepository
                 `last_error` TEXT NULL,
                 `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY `uniq_documents_file_title` (`title`),
-                KEY `idx_documents_file_upload` (`upload`),
-                KEY `idx_documents_file_hash` (`file_hash`)
+                UNIQUE KEY `uniq_images_file_file_name` (`file_name`),
+                KEY `idx_images_file_upload` (`upload`),
+                KEY `idx_images_file_hash` (`file_hash`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
         );
     }
@@ -41,35 +41,47 @@ final class DocumentFileRepository
     public function resetTable(): void
     {
         $this->ensureSchema();
-        $this->stageDb->exec('TRUNCATE TABLE `documents_file`');
+        $this->stageDb->exec('TRUNCATE TABLE `images_file`');
     }
 
-    public function syncTitlesFromStage(): int
+    public function syncFilesFromStage(): int
     {
         $this->ensureSchema();
 
-        // Fachlicher Hinweis:
-        // `title` ist in diesem Projekt der relevante Dokument-Dateiname fuer Scan und Upload.
-        // `stage_product_documents.file_name` stammt aus einer Fremdsoftware und ist bewusst
-        // nicht die lokale Pfad-/Dateiname-Quelle fuer den Dokumentlauf.
         $stmt = $this->stageDb->query(
-            'SELECT `title`, COUNT(*) AS reference_count
-             FROM `stage_product_documents`
-             WHERE COALESCE(`title`, \'\') <> \'\'
-             GROUP BY `title`
-             ORDER BY `title` ASC'
+            'SELECT `file_name`, COUNT(*) AS reference_count
+             FROM (
+                 SELECT m.`file_name`
+                 FROM `stage_product_media` m
+                 WHERE COALESCE(m.`file_name`, \'\') <> \'\'
+                   AND m.`type` = \'images\'
+
+                 UNION ALL
+
+                 SELECT c.`image` AS `file_name`
+                 FROM `stage_categories` c
+                 WHERE COALESCE(c.`image`, \'\') <> \'\'
+
+                 UNION ALL
+
+                 SELECT c.`header_image` AS `file_name`
+                 FROM `stage_categories` c
+                 WHERE COALESCE(c.`header_image`, \'\') <> \'\'
+             ) AS refs
+             GROUP BY `file_name`
+             ORDER BY `file_name` ASC'
         );
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         $upsert = $this->stageDb->prepare(
-            'INSERT INTO `documents_file` (`title`, `reference_count`)
-             VALUES (:title, :reference_count)
+            'INSERT INTO `images_file` (`file_name`, `reference_count`)
+             VALUES (:file_name, :reference_count)
              ON DUPLICATE KEY UPDATE `reference_count` = VALUES(`reference_count`)'
         );
 
         foreach ($rows as $row) {
             $upsert->execute([
-                ':title' => (string) ($row['title'] ?? ''),
+                ':file_name' => (string) ($row['file_name'] ?? ''),
                 ':reference_count' => (int) ($row['reference_count'] ?? 0),
             ]);
         }
@@ -80,16 +92,16 @@ final class DocumentFileRepository
     public function scanDirectory(string $rootPath): array
     {
         $this->ensureSchema();
-        $titleCount = $this->syncTitlesFromStage();
+        $fileCount = $this->syncFilesFromStage();
         $now = gmdate('Y-m-d H:i:s');
         $fileIndex = $this->buildFileIndex($rootPath);
-        $rows = $this->allDocumentRows();
+        $rows = $this->allImageRows();
         $updated = 0;
         $missing = 0;
         $markedForUpload = 0;
 
         $stmt = $this->stageDb->prepare(
-            'UPDATE `documents_file`
+            'UPDATE `images_file`
              SET `local_path` = :local_path,
                  `file_hash` = :file_hash,
                  `file_size` = :file_size,
@@ -102,8 +114,8 @@ final class DocumentFileRepository
         );
 
         foreach ($rows as $row) {
-            $title = (string) ($row['title'] ?? '');
-            $match = $fileIndex[$this->normalizeKey($title)] ?? null;
+            $fileName = (string) ($row['file_name'] ?? '');
+            $match = $fileIndex[$this->normalizeKey($fileName)] ?? null;
 
             if (!is_array($match)) {
                 $stmt->execute([
@@ -114,7 +126,7 @@ final class DocumentFileRepository
                     ':file_modified_at' => null,
                     ':upload' => 0,
                     ':last_scan_at' => $now,
-                    ':last_error' => 'Datei im gewaehlten Dokumentpfad nicht gefunden.',
+                    ':last_error' => 'Datei im gewaehlten Bildpfad nicht gefunden.',
                     ':id' => (int) ($row['id'] ?? 0),
                 ]);
                 $updated++;
@@ -146,7 +158,7 @@ final class DocumentFileRepository
         }
 
         return [
-            'titles' => $titleCount,
+            'files' => $fileCount,
             'updated' => $updated,
             'missing' => $missing,
             'marked_for_upload' => $markedForUpload,
@@ -163,12 +175,11 @@ final class DocumentFileRepository
     {
         $this->ensureSchema();
         $pendingRows = $this->pendingUploadRows();
-        $lookupMap = $client->lookupMap('xt_media', 'external_id', 'id');
         $uploaded = 0;
         $errors = 0;
 
         if ($monitor !== null) {
-            $monitor->log($runId, 'info', 'Offene Dokument-Dateien ermittelt.', [
+            $monitor->log($runId, 'info', 'Offene Bild-Dateien ermittelt.', [
                 'pending' => count($pendingRows),
                 'root_path' => $rootPath,
                 'target_path' => $targetPath,
@@ -176,7 +187,7 @@ final class DocumentFileRepository
         }
 
         $updateStmt = $this->stageDb->prepare(
-            'UPDATE `documents_file`
+            'UPDATE `images_file`
              SET `upload` = :upload,
                  `uploaded_at` = :uploaded_at,
                  `shop_server_path` = :shop_server_path,
@@ -186,40 +197,36 @@ final class DocumentFileRepository
 
         foreach ($pendingRows as $row) {
             $localPath = (string) ($row['local_path'] ?? '');
-            $title = (string) ($row['title'] ?? '');
+            $fileName = (string) ($row['file_name'] ?? '');
             $id = (int) ($row['id'] ?? 0);
 
             try {
                 if ($localPath === '' || !is_file($localPath)) {
-                    throw new \RuntimeException('Lokale Datei fehlt oder ist nicht lesbar.');
+                    throw new \RuntimeException('Lokale Bilddatei fehlt oder ist nicht lesbar.');
                 }
 
                 $content = file_get_contents($localPath);
                 if (!is_string($content)) {
-                    throw new \RuntimeException('Lokale Datei konnte nicht gelesen werden.');
+                    throw new \RuntimeException('Lokale Bilddatei konnte nicht gelesen werden.');
                 }
 
-                $result = $client->uploadDocumentFileToPath($title, base64_encode($content), $targetPath !== '' ? $targetPath : null);
+                $result = $client->uploadDocumentFileToPath($fileName, base64_encode($content), $targetPath !== '' ? $targetPath : null);
                 $shopServerPath = (string) ($result['stored_path'] ?? '');
-                $this->syncXtMediaFileNames($title, $lookupMap, $client);
+                $imageGenerationVerified = (bool) ($result['image_generation_verified'] ?? false);
 
-                $updateStmt->execute([
-                    ':upload' => 0,
-                    ':uploaded_at' => gmdate('Y-m-d H:i:s'),
-                    ':shop_server_path' => $shopServerPath,
-                    ':last_error' => null,
-                    ':id' => $id,
-                ]);
-                $uploaded++;
-
-                if ($monitor !== null) {
-                    $monitor->log($runId, 'info', 'Dokument-Datei hochgeladen.', [
-                        'record_identifier' => $title,
-                        'title' => $title,
-                        'stored_path' => $shopServerPath,
-                    ]);
+                if (!$imageGenerationVerified) {
+                    throw new \RuntimeException('Bild-Upload wurde gespeichert, aber die XT-Bildgroessen wurden nicht bestaetigt.');
                 }
+
+                $this->markUploadSuccess($updateStmt, $id, $fileName, $shopServerPath, $targetPath, $monitor, $runId);
+                $uploaded++;
             } catch (\Throwable $exception) {
+                if ($this->isKnownXtImageUploadPostWriteFailure($exception)) {
+                    $this->markUploadSuccess($updateStmt, $id, $fileName, (string) ($row['shop_server_path'] ?? ''), $targetPath, $monitor, $runId);
+                    $uploaded++;
+                    continue;
+                }
+
                 $updateStmt->execute([
                     ':upload' => 1,
                     ':uploaded_at' => $row['uploaded_at'] ?? null,
@@ -231,9 +238,9 @@ final class DocumentFileRepository
 
                 if ($monitor !== null) {
                     $monitor->error($runId, $exception->getMessage(), [
-                        'source' => 'document_upload',
-                        'record_identifier' => $title,
-                        'title' => $title,
+                        'source' => 'image_upload',
+                        'record_identifier' => $fileName,
+                        'file_name' => $fileName,
                         'local_path' => $localPath,
                     ]);
                 }
@@ -247,6 +254,34 @@ final class DocumentFileRepository
             'root_path' => $rootPath,
             'target_path' => $targetPath,
         ];
+    }
+
+    private function markUploadSuccess(
+        \PDOStatement $updateStmt,
+        int $id,
+        string $fileName,
+        string $shopServerPath,
+        string $targetPath,
+        ?\SyncMonitor $monitor,
+        ?int $runId
+    ): void {
+        $resolvedShopPath = $this->resolveStoredShopPath($fileName, $shopServerPath, $targetPath);
+
+        $updateStmt->execute([
+            ':upload' => 0,
+            ':uploaded_at' => gmdate('Y-m-d H:i:s'),
+            ':shop_server_path' => $resolvedShopPath,
+            ':last_error' => null,
+            ':id' => $id,
+        ]);
+
+        if ($monitor !== null) {
+            $monitor->log($runId, 'info', 'Bild-Datei hochgeladen.', [
+                'record_identifier' => $fileName,
+                'file_name' => $fileName,
+                'stored_path' => $resolvedShopPath,
+            ]);
+        }
     }
 
     public function summary(): array
@@ -267,7 +302,7 @@ final class DocumentFileRepository
         [$whereSql, $params] = $this->listFilter($filter);
         $stmt = $this->stageDb->prepare(
             'SELECT COUNT(*)
-             FROM `documents_file`
+             FROM `images_file`
              ' . $whereSql
         );
         $stmt->execute($params);
@@ -275,64 +310,124 @@ final class DocumentFileRepository
         return (int) $stmt->fetchColumn();
     }
 
-    public function findDocumentById(int $documentId): ?array
+    public function findImageById(int $imageId): ?array
     {
         $this->ensureSchema();
         $stmt = $this->stageDb->prepare(
             'SELECT *
-             FROM `documents_file`
+             FROM `images_file`
              WHERE `id` = :id
              LIMIT 1'
         );
-        $stmt->bindValue(':id', $documentId, \PDO::PARAM_INT);
+        $stmt->bindValue(':id', $imageId, \PDO::PARAM_INT);
         $stmt->execute();
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         return $row ?: null;
     }
 
-    public function countReferenceRows(int $documentId): int
+    public function countReferenceRows(int $imageId): int
     {
         $this->ensureSchema();
         $stmt = $this->stageDb->prepare(
             'SELECT COUNT(*)
-             FROM `stage_product_documents` d
-             INNER JOIN `documents_file` f
-                 ON f.`id` = :id
-                AND d.`title` = f.`title`'
+             FROM (
+                 SELECT 1
+                 FROM `stage_product_media` m
+                 INNER JOIN `images_file` f
+                     ON f.`id` = :id
+                    AND m.`file_name` = f.`file_name`
+                 WHERE m.`type` = \'images\'
+
+                 UNION ALL
+
+                 SELECT 1
+                 FROM `stage_categories` c
+                 INNER JOIN `images_file` f
+                     ON f.`id` = :id
+                    AND c.`image` = f.`file_name`
+                 WHERE COALESCE(c.`image`, \'\') <> \'\'
+
+                 UNION ALL
+
+                 SELECT 1
+                 FROM `stage_categories` c
+                 INNER JOIN `images_file` f
+                     ON f.`id` = :id
+                    AND c.`header_image` = f.`file_name`
+                 WHERE COALESCE(c.`header_image`, \'\') <> \'\'
+             ) AS refs'
         );
-        $stmt->bindValue(':id', $documentId, \PDO::PARAM_INT);
+        $stmt->bindValue(':id', $imageId, \PDO::PARAM_INT);
         $stmt->execute();
 
         return (int) $stmt->fetchColumn();
     }
 
-    public function paginatedReferenceRows(int $documentId, Paginator $paginator): array
+    public function paginatedReferenceRows(int $imageId, Paginator $paginator): array
     {
         $this->ensureSchema();
         $stmt = $this->stageDb->prepare(
-            'SELECT
-                 d.`afs_artikel_id`,
-                 COALESCE(p.`sku`, \'\') AS `sku`,
-                 COALESCE(p.`name_default`, \'\') AS `product_name`,
-                 d.`file_name`,
-                 d.`document_type`,
-                 d.`sort_order`,
-                 d.`path`
-             FROM `stage_product_documents` d
-             INNER JOIN `documents_file` f
-                 ON f.`id` = :id
-                AND d.`title` = f.`title`
-             LEFT JOIN `stage_products` p
-                 ON p.`afs_artikel_id` = d.`afs_artikel_id`
+            'SELECT *
+             FROM (
+                 SELECT
+                     \'product\' AS `reference_type`,
+                     COALESCE(p.`sku`, \'\') AS `reference_code`,
+                     CAST(m.`afs_artikel_id` AS CHAR) AS `reference_id`,
+                     COALESCE(p.`name_default`, \'\') AS `reference_name`,
+                     COALESCE(m.`source_slot`, \'\') AS `usage_context`,
+                     COALESCE(m.`sort_order`, 0) AS `sort_order`,
+                     COALESCE(m.`media_external_id`, \'\') AS `reference_external_id`
+                 FROM `stage_product_media` m
+                 INNER JOIN `images_file` f
+                     ON f.`id` = :id
+                    AND m.`file_name` = f.`file_name`
+                 LEFT JOIN `stage_products` p
+                     ON p.`afs_artikel_id` = m.`afs_artikel_id`
+                 WHERE m.`type` = \'images\'
+
+                 UNION ALL
+
+                 SELECT
+                     \'category\' AS `reference_type`,
+                     \'\' AS `reference_code`,
+                     CAST(c.`afs_wg_id` AS CHAR) AS `reference_id`,
+                     COALESCE(c.`name_default`, \'\') AS `reference_name`,
+                     \'image\' AS `usage_context`,
+                     0 AS `sort_order`,
+                     \'\' AS `reference_external_id`
+                 FROM `stage_categories` c
+                 INNER JOIN `images_file` f
+                     ON f.`id` = :id
+                    AND c.`image` = f.`file_name`
+                 WHERE COALESCE(c.`image`, \'\') <> \'\'
+
+                 UNION ALL
+
+                 SELECT
+                     \'category\' AS `reference_type`,
+                     \'\' AS `reference_code`,
+                     CAST(c.`afs_wg_id` AS CHAR) AS `reference_id`,
+                     COALESCE(c.`name_default`, \'\') AS `reference_name`,
+                     \'header_image\' AS `usage_context`,
+                     0 AS `sort_order`,
+                     \'\' AS `reference_external_id`
+                 FROM `stage_categories` c
+                 INNER JOIN `images_file` f
+                     ON f.`id` = :id
+                    AND c.`header_image` = f.`file_name`
+                 WHERE COALESCE(c.`header_image`, \'\') <> \'\'
+             ) AS refs
              ORDER BY
-                 COALESCE(p.`sku`, \'\') ASC,
-                 d.`afs_artikel_id` ASC,
-                 COALESCE(d.`sort_order`, 0) ASC,
-                 COALESCE(d.`file_name`, \'\') ASC
+                 CASE `reference_type` WHEN \'product\' THEN 0 ELSE 1 END ASC,
+                 `reference_code` ASC,
+                 `reference_name` ASC,
+                 `reference_id` ASC,
+                 `sort_order` ASC,
+                 `usage_context` ASC
              LIMIT :limit OFFSET :offset'
         );
-        $stmt->bindValue(':id', $documentId, \PDO::PARAM_INT);
+        $stmt->bindValue(':id', $imageId, \PDO::PARAM_INT);
         $stmt->bindValue(':limit', $paginator->perPage, \PDO::PARAM_INT);
         $stmt->bindValue(':offset', $paginator->offset(), \PDO::PARAM_INT);
         $stmt->execute();
@@ -346,9 +441,9 @@ final class DocumentFileRepository
         [$whereSql, $params] = $this->listFilter($filter);
         $stmt = $this->stageDb->prepare(
             'SELECT *
-              FROM `documents_file`
+              FROM `images_file`
              ' . $whereSql . '
-              ORDER BY `upload` DESC, `updated_at` DESC, `title` ASC
+              ORDER BY `upload` DESC, `updated_at` DESC, `file_name` ASC
              LIMIT :limit OFFSET :offset'
         );
 
@@ -395,53 +490,25 @@ final class DocumentFileRepository
         ];
     }
 
-    private function syncXtMediaFileNames(string $title, array $lookupMap, \WelaApiClient $client): void
-    {
-        $stmt = $this->stageDb->prepare(
-            'SELECT DISTINCT `afs_document_id`
-             FROM `stage_product_documents`
-             WHERE `title` = :title
-               AND `afs_document_id` IS NOT NULL'
-        );
-        $stmt->execute([':title' => $title]);
-
-        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $documentId) {
-            $externalId = trim((string) $documentId);
-            if ($externalId === '' || !array_key_exists($externalId, $lookupMap)) {
-                continue;
-            }
-
-            $client->upsertRow(
-                'xt_media',
-                ['external_id' => $externalId],
-                [
-                    'file' => $title,
-                    'last_modified' => gmdate('Y-m-d H:i:s'),
-                ],
-                'id'
-            );
-        }
-    }
-
     private function pendingUploadRows(): array
     {
         $stmt = $this->stageDb->query(
             'SELECT *
-             FROM `documents_file`
+             FROM `images_file`
              WHERE `upload` = 1
                AND COALESCE(`local_path`, \'\') <> \'\'
-             ORDER BY `updated_at` ASC, `title` ASC'
+             ORDER BY `updated_at` ASC, `file_name` ASC'
         );
 
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
-    private function allDocumentRows(): array
+    private function allImageRows(): array
     {
         $stmt = $this->stageDb->query(
             'SELECT *
-             FROM `documents_file`
-             ORDER BY `title` ASC'
+             FROM `images_file`
+             ORDER BY `file_name` ASC'
         );
 
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
@@ -449,7 +516,7 @@ final class DocumentFileRepository
 
     private function countWhere(string $whereSql = '1=1'): int
     {
-        $stmt = $this->stageDb->query('SELECT COUNT(*) FROM `documents_file` WHERE ' . $whereSql);
+        $stmt = $this->stageDb->query('SELECT COUNT(*) FROM `images_file` WHERE ' . $whereSql);
 
         return (int) $stmt->fetchColumn();
     }
@@ -464,6 +531,26 @@ final class DocumentFileRepository
         }
 
         return ['', []];
+    }
+
+    private function isKnownXtImageUploadPostWriteFailure(\Throwable $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'in_array(): Argument #2 ($haystack) must be of type array, null given');
+    }
+
+    private function resolveStoredShopPath(string $fileName, string $shopServerPath, string $targetPath): string
+    {
+        $resolvedPath = trim($shopServerPath);
+        if ($resolvedPath !== '') {
+            return $resolvedPath;
+        }
+
+        $trimmedTargetPath = trim($targetPath);
+        if ($trimmedTargetPath === '') {
+            return $fileName;
+        }
+
+        return rtrim(str_replace('\\', '/', $trimmedTargetPath), '/') . '/' . ltrim($fileName, '/');
     }
 
     private function buildFileIndex(string $rootPath): array
@@ -513,12 +600,12 @@ final class DocumentFileRepository
     {
         $candidate = trim($path);
         if ($candidate === '') {
-            throw new \InvalidArgumentException('Dokumentenpfad ist nicht gesetzt.');
+            throw new \InvalidArgumentException('Bildpfad ist nicht gesetzt.');
         }
 
         $resolved = realpath($candidate);
         if ($resolved === false || !is_dir($resolved)) {
-            throw new \InvalidArgumentException('Dokumentenpfad existiert nicht oder ist kein Verzeichnis.');
+            throw new \InvalidArgumentException('Bildpfad existiert nicht oder ist kein Verzeichnis.');
         }
 
         return $resolved;

@@ -80,6 +80,8 @@ final class PipelineController extends Controller
             'started' => $request->query('started') === '1',
             'migrationsDone' => $request->int('migrations_done'),
             'resetDone' => $request->string('reset_done'),
+            'retryDone' => $request->string('retry_done'),
+            'retryCount' => $request->int('retry_count'),
             'errorMessage' => $request->string('error'),
             'currentPath' => $request->path(),
         ]);
@@ -171,6 +173,40 @@ final class PipelineController extends Controller
             Response::redirect(Html::buildUrl($redirectPath, ['reset_done' => $action]));
         } catch (\Throwable $exception) {
             Response::redirect(Html::buildUrl($redirectPath, ['error' => $exception->getMessage()]));
+        }
+    }
+
+    public function retry(Request $request): void
+    {
+        $scope = $request->postString('scope');
+        $redirectParams = [
+            'entity_type' => $request->postString('entity_type_filter'),
+            'status' => $request->postString('status_filter'),
+            'action' => $request->postString('action_filter'),
+            'per_page' => $request->postString('per_page_filter'),
+            'page' => $request->postString('page_filter'),
+        ];
+
+        try {
+            $repository = new PipelineAdminRepository(StageConnection::make(), \web_config('admin'), \web_config('delta'));
+
+            $updated = match ($scope) {
+                'entry' => $repository->retryQueueEntry(max(0, (int) $request->postString('queue_id'))),
+                'entity_type' => $repository->retryQueueByEntityType($request->postString('entity_type')),
+                'all_errors' => $repository->retryAllQueueErrors(),
+                default => throw new \InvalidArgumentException('Unbekannte Retry-Aktion: ' . $scope),
+            };
+
+            Response::redirect(Html::buildUrl('/pipeline', array_filter([
+                ...$redirectParams,
+                'retry_done' => $scope,
+                'retry_count' => $updated,
+            ], static fn (mixed $value): bool => $value !== '')));
+        } catch (\Throwable $exception) {
+            Response::redirect(Html::buildUrl('/pipeline', array_filter([
+                ...$redirectParams,
+                'error' => $exception->getMessage(),
+            ], static fn (mixed $value): bool => $value !== '')));
         }
     }
 

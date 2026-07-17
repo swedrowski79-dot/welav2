@@ -8,19 +8,19 @@ if (($activeFilter ?? 'all') !== 'all') {
 ?>
 
 <?php if (!empty($saved)): ?>
-    <div class="alert alert-success border-0 shadow-sm">Dokumentenpfad gespeichert.</div>
+    <div class="alert alert-success border-0 shadow-sm">Bildpfad gespeichert.</div>
 <?php endif; ?>
 
 <?php if (!empty($scanDone)): ?>
-    <div class="alert alert-success border-0 shadow-sm">Dokumentenpfad gescannt und `documents_file` aktualisiert.</div>
+    <div class="alert alert-success border-0 shadow-sm">Bildpfad gescannt und `images_file` mit Produkt- und Kategoriebildern aktualisiert.</div>
 <?php endif; ?>
 
 <?php if (!empty($uploadDone)): ?>
-    <div class="alert alert-success border-0 shadow-sm">Alle markierten Dokument-Dateien wurden zur API hochgeladen.</div>
+    <div class="alert alert-success border-0 shadow-sm">Alle markierten Bild-Dateien wurden zur API hochgeladen.</div>
 <?php endif; ?>
 
 <?php if (!empty($resetDone)): ?>
-    <div class="alert alert-warning border-0 shadow-sm">`documents_file` wurde geleert.</div>
+    <div class="alert alert-warning border-0 shadow-sm">`images_file` wurde geleert.</div>
 <?php endif; ?>
 
 <?php if (!empty($errorMessage)): ?>
@@ -30,12 +30,12 @@ if (($activeFilter ?? 'all') !== 'all') {
 <div class="panel-card p-4 mb-4">
     <div class="d-flex flex-column flex-xl-row justify-content-between gap-4">
         <div class="flex-grow-1">
-            <h2 class="h5 mb-1">Dokumentenlauf</h2>
-            <div class="small text-secondary mb-3">Scan und Upload laufen separat von der Pipeline. Die Pfade werden zentral unter <a href="/status">Status</a> gepflegt.</div>
+            <h2 class="h5 mb-1">Bildlauf</h2>
+            <div class="small text-secondary mb-3">Scan und Upload laufen separat von der Pipeline. Erfasst werden Produkt- und Kategoriebilder. Die Pfade werden zentral unter <a href="/status">Status</a> gepflegt.</div>
             <div class="subtle-list">
                 <div>
-                    <div class="small text-secondary mb-1">Lokaler Dokumentpfad</div>
-                    <div class="path-chip"><?= Html::escape($documentPath !== '' ? $documentPath : 'Nicht gesetzt') ?></div>
+                    <div class="small text-secondary mb-1">Lokaler Bildpfad</div>
+                    <div class="path-chip"><?= Html::escape($imagePath !== '' ? $imagePath : 'Nicht gesetzt') ?></div>
                 </div>
                 <div>
                     <div class="small text-secondary mb-1">Shop-Zielpfad</div>
@@ -45,28 +45,28 @@ if (($activeFilter ?? 'all') !== 'all') {
         </div>
         <div class="d-flex flex-column gap-2 align-items-stretch align-items-xl-end">
             <a class="btn btn-outline-secondary" href="/status">Pfade konfigurieren</a>
-            <form method="post" action="/document-files/scan">
-                <button class="btn btn-outline-primary w-100" type="submit">Dokumentenpfad scannen</button>
+            <form method="post" action="/image-files/scan">
+                <button class="btn btn-outline-primary w-100" type="submit">Bildpfad scannen</button>
             </form>
-            <form method="post" action="/document-files/upload">
-                <button class="btn btn-primary w-100" type="submit">Offene Dokumente hochladen</button>
+            <form method="post" action="/image-files/upload">
+                <button class="btn btn-primary w-100" type="submit">Offene Bilder hochladen</button>
             </form>
-            <form method="post" action="/document-files/reset" onsubmit="return confirm('Wollen Sie wirklich die Tabelle documents_file leeren? Diese Aktion kann nicht rueckgaengig gemacht werden.');">
+            <form method="post" action="/image-files/reset" onsubmit="return confirm('Wollen Sie wirklich die Tabelle images_file leeren? Diese Aktion kann nicht rueckgaengig gemacht werden.');">
                 <button class="btn btn-outline-danger w-100" type="submit">Tabelle leeren</button>
             </form>
         </div>
     </div>
-    <?php if (($documentPath ?? '') === ''): ?>
-        <div class="alert alert-warning border-0 shadow-sm mt-4 mb-0">Es ist noch kein lokaler Dokumentpfad gesetzt.</div>
+    <?php if (($imagePath ?? '') === ''): ?>
+        <div class="alert alert-warning border-0 shadow-sm mt-4 mb-0">Es ist noch kein lokaler Bildpfad gesetzt.</div>
     <?php endif; ?>
 </div>
 
 <div class="row g-4 mb-4">
     <div class="col-12 col-md-4">
         <div class="metric-card p-4 h-100">
-            <div class="metric-icon mb-3"><i class="bi bi-file-earmark-text"></i></div>
+            <div class="metric-icon mb-3"><i class="bi bi-image"></i></div>
             <div class="display-6 fw-semibold"><?= Html::escape($summary['total'] ?? 0) ?></div>
-            <div class="text-secondary">Titel</div>
+            <div class="text-secondary">Dateien</div>
         </div>
     </div>
     <div class="col-12 col-md-4">
@@ -90,17 +90,17 @@ if (($activeFilter ?? 'all') !== 'all') {
     <div class="card-header px-4 py-3">
         <div class="d-flex flex-column gap-3">
             <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
-                <h2 class="h5 mb-0">documents_file</h2>
+                <h2 class="h5 mb-0">images_file</h2>
                 <div class="d-flex flex-wrap gap-2">
-                    <a class="btn <?= ($activeFilter ?? 'all') === 'all' ? 'btn-primary' : 'btn-outline-primary' ?>" href="<?= Html::escape(Html::buildUrl('/document-files', ['per_page' => $paginator->perPage])) ?>">
-                        Alle Dokumente
+                    <a class="btn <?= ($activeFilter ?? 'all') === 'all' ? 'btn-primary' : 'btn-outline-primary' ?>" href="<?= Html::escape(Html::buildUrl('/image-files', ['per_page' => $paginator->perPage])) ?>">
+                        Alle Bilder
                     </a>
-                    <a class="btn <?= ($activeFilter ?? 'all') === 'missing' ? 'btn-danger' : 'btn-outline-danger' ?>" href="<?= Html::escape(Html::buildUrl('/document-files', ['filter' => 'missing', 'per_page' => $paginator->perPage])) ?>">
-                        Nicht gefundene Dokumente (<?= Html::escape($summary['missing_path'] ?? 0) ?>)
+                    <a class="btn <?= ($activeFilter ?? 'all') === 'missing' ? 'btn-danger' : 'btn-outline-danger' ?>" href="<?= Html::escape(Html::buildUrl('/image-files', ['filter' => 'missing', 'per_page' => $paginator->perPage])) ?>">
+                        Nicht gefundene Bilder (<?= Html::escape($summary['missing_path'] ?? 0) ?>)
                     </a>
                 </div>
             </div>
-            <form class="row g-3 align-items-end" method="get" action="/document-files">
+            <form class="row g-3 align-items-end" method="get" action="/image-files">
                 <?php if (($activeFilter ?? 'all') !== 'all'): ?>
                     <input type="hidden" name="filter" value="<?= Html::escape($activeFilter) ?>">
                 <?php endif; ?>
@@ -117,7 +117,7 @@ if (($activeFilter ?? 'all') !== 'all') {
                 </div>
                 <div class="col-12 col-md">
                     <div class="text-secondary small">
-                        <?= Html::escape($paginator->total) ?> Dokumente
+                        <?= Html::escape($paginator->total) ?> Bilder
                         <span class="mx-1">|</span>
                         Seite <?= Html::escape($paginator->page) ?> von <?= Html::escape($paginator->totalPages()) ?>
                     </div>
@@ -125,11 +125,11 @@ if (($activeFilter ?? 'all') !== 'all') {
             </form>
             <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 pt-2 border-top">
                 <div class="text-secondary small">
-                    <?= Html::escape($paginator->total) ?> Dokumente
+                    <?= Html::escape($paginator->total) ?> Bilder
                     <span class="mx-1">|</span>
                     Seite <?= Html::escape($paginator->page) ?> von <?= Html::escape($paginator->totalPages()) ?>
                 </div>
-                <?php $path = '/document-files'; $query = $tableQuery; require dirname(__DIR__) . '/partials/pagination.php'; ?>
+                <?php $path = '/image-files'; $query = $tableQuery; require dirname(__DIR__) . '/partials/pagination.php'; ?>
             </div>
         </div>
     </div>
@@ -137,7 +137,7 @@ if (($activeFilter ?? 'all') !== 'all') {
         <table class="table table-hover mb-0">
             <thead>
             <tr>
-                <th>Title</th>
+                <th>Dateiname</th>
                 <th>Refs</th>
                 <th>Upload</th>
                 <th>Lokaler Pfad</th>
@@ -151,22 +151,22 @@ if (($activeFilter ?? 'all') !== 'all') {
                 <tr>
                     <td colspan="7" class="text-center text-secondary py-4">
                         <?= ($activeFilter ?? 'all') === 'missing'
-                            ? 'Aktuell sind keine fehlenden Dokumente markiert.'
-                            : 'Keine Dokumente vorhanden.' ?>
+                            ? 'Aktuell sind keine fehlenden Produkt- oder Kategoriebilder markiert.'
+                            : 'Keine Bilder vorhanden.' ?>
                     </td>
                 </tr>
             <?php endif; ?>
             <?php foreach ($rows as $row): ?>
                 <tr>
-                    <td><?= Html::escape($row['title'] ?? '') ?></td>
+                    <td><?= Html::escape($row['file_name'] ?? '') ?></td>
                     <td>
                         <?php if ((int) ($row['reference_count'] ?? 0) > 0): ?>
                             <button
                                 class="btn btn-sm btn-outline-secondary"
                                 type="button"
-                                data-document-references-open
-                                data-document-id="<?= Html::escape($row['id'] ?? 0) ?>"
-                                data-document-title="<?= Html::escape($row['title'] ?? '') ?>"
+                                data-image-references-open
+                                data-image-id="<?= Html::escape($row['id'] ?? 0) ?>"
+                                data-image-name="<?= Html::escape($row['file_name'] ?? '') ?>"
                             >
                                 <?= Html::escape($row['reference_count'] ?? 0) ?>
                             </button>
@@ -190,16 +190,16 @@ if (($activeFilter ?? 'all') !== 'all') {
     </div>
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 p-4 border-top">
         <div class="text-secondary small">
-            <?= Html::escape($paginator->total) ?> Dokumente
+            <?= Html::escape($paginator->total) ?> Bilder
             <span class="mx-1">|</span>
             Seite <?= Html::escape($paginator->page) ?> von <?= Html::escape($paginator->totalPages()) ?>
         </div>
-        <?php $path = '/document-files'; $query = $tableQuery; require dirname(__DIR__) . '/partials/pagination.php'; ?>
+        <?php $path = '/image-files'; $query = $tableQuery; require dirname(__DIR__) . '/partials/pagination.php'; ?>
     </div>
 </div>
 
 <style>
-    .document-references-backdrop {
+    .image-references-backdrop {
         position: fixed;
         inset: 0;
         background: rgba(15, 23, 42, 0.55);
@@ -209,10 +209,10 @@ if (($activeFilter ?? 'all') !== 'all') {
         z-index: 1060;
         padding: 1.5rem;
     }
-    .document-references-backdrop.is-open {
+    .image-references-backdrop.is-open {
         display: flex;
     }
-    .document-references-modal {
+    .image-references-modal {
         width: min(1100px, 100%);
         max-height: min(88vh, 960px);
         display: flex;
@@ -222,44 +222,44 @@ if (($activeFilter ?? 'all') !== 'all') {
         box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
         overflow: hidden;
     }
-    .document-references-body {
+    .image-references-body {
         overflow: auto;
         padding: 1rem 1.25rem 1.25rem;
     }
-    .document-references-status {
+    .image-references-status {
         min-height: 1.25rem;
         font-size: 0.9rem;
         color: var(--text-soft);
     }
 </style>
 
-<div class="document-references-backdrop" data-document-references-modal aria-hidden="true">
-    <div class="document-references-modal">
+<div class="image-references-backdrop" data-image-references-modal aria-hidden="true">
+    <div class="image-references-modal">
         <div class="d-flex align-items-center justify-content-between px-4 py-3 border-bottom">
             <div>
-                <h2 class="h5 mb-1" data-document-references-title>Artikel-Referenzen</h2>
-                <div class="small text-secondary">Zeigt, welche Artikel dieses Dokument aktuell referenzieren.</div>
+                <h2 class="h5 mb-1" data-image-references-title>Bild-Referenzen</h2>
+                <div class="small text-secondary">Zeigt, welche Produkte oder Kategorien dieses Bild aktuell referenzieren.</div>
             </div>
-            <button class="btn btn-outline-secondary" type="button" data-document-references-close>Schliessen</button>
+            <button class="btn btn-outline-secondary" type="button" data-image-references-close>Schliessen</button>
         </div>
-        <div class="document-references-body">
-            <div class="document-references-status" data-document-references-status></div>
-            <div data-document-references-content></div>
+        <div class="image-references-body">
+            <div class="image-references-status" data-image-references-status></div>
+            <div data-image-references-content></div>
         </div>
     </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    var modal = document.querySelector('[data-document-references-modal]');
+    var modal = document.querySelector('[data-image-references-modal]');
     if (!modal) {
         return;
     }
 
-    var titleNode = modal.querySelector('[data-document-references-title]');
-    var contentNode = modal.querySelector('[data-document-references-content]');
-    var statusNode = modal.querySelector('[data-document-references-status]');
-    var currentTitle = 'Artikel-Referenzen';
+    var titleNode = modal.querySelector('[data-image-references-title]');
+    var contentNode = modal.querySelector('[data-image-references-content]');
+    var statusNode = modal.querySelector('[data-image-references-status]');
+    var currentTitle = 'Bild-Referenzen';
 
     function setStatus(message) {
         if (statusNode) {
@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function openModal(title) {
-        currentTitle = title || 'Artikel-Referenzen';
+        currentTitle = title || 'Bild-Referenzen';
         if (titleNode) {
             titleNode.textContent = currentTitle;
         }
@@ -305,15 +305,15 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    document.querySelectorAll('[data-document-references-open]').forEach(function (button) {
+    document.querySelectorAll('[data-image-references-open]').forEach(function (button) {
         button.addEventListener('click', function () {
-            var documentId = button.dataset.documentId || '';
-            var documentTitle = button.dataset.documentTitle || 'Artikel-Referenzen';
-            if (!documentId) {
+            var imageId = button.dataset.imageId || '';
+            var imageName = button.dataset.imageName || 'Bild-Referenzen';
+            if (!imageId) {
                 return;
             }
 
-            loadReferences('/document-files/references?id=' + encodeURIComponent(documentId), 'Referenzen: ' + documentTitle);
+            loadReferences('/image-files/references?id=' + encodeURIComponent(imageId), 'Referenzen: ' + imageName);
         });
     });
 
@@ -323,7 +323,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        var closeButton = event.target.closest('[data-document-references-close]');
+        var closeButton = event.target.closest('[data-image-references-close]');
         if (closeButton) {
             closeModal();
             return;
@@ -337,7 +337,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     modal.addEventListener('submit', function (event) {
-        var form = event.target.closest('[data-document-references-form]');
+        var form = event.target.closest('[data-image-references-form]');
         if (!form) {
             return;
         }

@@ -16,6 +16,13 @@
     <div class="alert alert-warning border-0 shadow-sm">Reset-Aktion `<?= Html::escape($resetDone) ?>` wurde ausgefuehrt und in den Logs vermerkt.</div>
 <?php endif; ?>
 
+<?php if (!empty($retryDone)): ?>
+    <div class="alert alert-success border-0 shadow-sm">
+        Retry-Aktion `<?= Html::escape($retryDone) ?>` wurde ausgefuehrt.
+        <?= Html::escape((int) ($retryCount ?? 0)) ?> Queue-Eintraege wurden auf `pending` zurueckgesetzt.
+    </div>
+<?php endif; ?>
+
 <?php if (!empty($errorMessage)): ?>
     <div class="alert alert-danger border-0 shadow-sm"><?= Html::escape($errorMessage) ?></div>
 <?php endif; ?>
@@ -251,11 +258,24 @@
 
 <?php if (!empty($queueSummaryByEntity)): ?>
     <div class="panel-card p-4 mb-4">
-        <h2 class="h5 mb-1">Queue nach Entity-Typ</h2>
-        <div class="small text-secondary mb-3">Schneller Ueberblick, ob Delta fuer die konfigurierten Entity-Typen pending Eintraege erzeugt hat und wie weit der Worker je Entity-Typ gekommen ist.</div>
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">
+            <div>
+                <h2 class="h5 mb-1">Queue nach Entity-Typ</h2>
+                <div class="small text-secondary">Schneller Ueberblick, ob Delta fuer die konfigurierten Entity-Typen pending Eintraege erzeugt hat und wie weit der Worker je Entity-Typ gekommen ist.</div>
+            </div>
+            <form method="post" action="/pipeline/retry" onsubmit="return confirm('Alle fehlgeschlagenen Export-Queue-Eintraege auf Retry setzen?');">
+                <input type="hidden" name="scope" value="all_errors">
+                <input type="hidden" name="entity_type_filter" value="<?= Html::escape($filters['entity_type'] ?? '') ?>">
+                <input type="hidden" name="status_filter" value="<?= Html::escape($filters['status'] ?? '') ?>">
+                <input type="hidden" name="action_filter" value="<?= Html::escape($filters['action'] ?? '') ?>">
+                <input type="hidden" name="per_page_filter" value="<?= Html::escape($paginator->perPage ?? 20) ?>">
+                <input type="hidden" name="page_filter" value="<?= Html::escape($paginator->page ?? 1) ?>">
+                <button class="btn btn-outline-warning" type="submit">Gesamte Fehler-Queue auf Retry</button>
+            </form>
+        </div>
         <div class="table-responsive">
             <table class="table table-hover mb-0">
-                <thead><tr><th>Entity</th><th>Pending</th><th>Processing</th><th>Done</th><th>Error</th></tr></thead>
+                <thead><tr><th>Entity</th><th>Pending</th><th>Processing</th><th>Done</th><th>Error</th><th>Aktion</th></tr></thead>
                 <tbody>
                 <?php foreach ($queueSummaryByEntity as $entityType => $summary): ?>
                     <tr>
@@ -264,6 +284,22 @@
                         <td><?= Html::escape($summary['processing'] ?? 0) ?></td>
                         <td><?= Html::escape($summary['done'] ?? 0) ?></td>
                         <td><?= Html::escape($summary['error'] ?? 0) ?></td>
+                        <td>
+                            <?php if ((int) ($summary['error'] ?? 0) > 0): ?>
+                                <form method="post" action="/pipeline/retry" onsubmit="return confirm('Alle fehlgeschlagenen <?= Html::escape($entityType) ?>-Eintraege auf Retry setzen?');">
+                                    <input type="hidden" name="scope" value="entity_type">
+                                    <input type="hidden" name="entity_type" value="<?= Html::escape($entityType) ?>">
+                                    <input type="hidden" name="entity_type_filter" value="<?= Html::escape($filters['entity_type'] ?? '') ?>">
+                                    <input type="hidden" name="status_filter" value="<?= Html::escape($filters['status'] ?? '') ?>">
+                                    <input type="hidden" name="action_filter" value="<?= Html::escape($filters['action'] ?? '') ?>">
+                                    <input type="hidden" name="per_page_filter" value="<?= Html::escape($paginator->perPage ?? 20) ?>">
+                                    <input type="hidden" name="page_filter" value="<?= Html::escape($paginator->page ?? 1) ?>">
+                                    <button class="btn btn-sm btn-outline-warning" type="submit">Retry</button>
+                                </form>
+                            <?php else: ?>
+                                <span class="text-secondary small">Kein Fehler</span>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -623,6 +659,18 @@
                                 <div class="small text-danger mt-2"><?= Html::escape($entry['last_error']) ?></div>
                             <?php endif; ?>
                         </details>
+                        <?php if (($entry['status'] ?? '') === 'error'): ?>
+                            <form class="mt-2" method="post" action="/pipeline/retry" onsubmit="return confirm('Queue-Eintrag #<?= Html::escape($entry['id']) ?> auf Retry setzen?');">
+                                <input type="hidden" name="scope" value="entry">
+                                <input type="hidden" name="queue_id" value="<?= Html::escape($entry['id']) ?>">
+                                <input type="hidden" name="entity_type_filter" value="<?= Html::escape($filters['entity_type'] ?? '') ?>">
+                                <input type="hidden" name="status_filter" value="<?= Html::escape($filters['status'] ?? '') ?>">
+                                <input type="hidden" name="action_filter" value="<?= Html::escape($filters['action'] ?? '') ?>">
+                                <input type="hidden" name="per_page_filter" value="<?= Html::escape($paginator->perPage ?? 20) ?>">
+                                <input type="hidden" name="page_filter" value="<?= Html::escape($paginator->page ?? 1) ?>">
+                                <button class="btn btn-sm btn-outline-warning" type="submit">Eintrag auf Retry setzen</button>
+                            </form>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>

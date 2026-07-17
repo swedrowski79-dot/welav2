@@ -8,6 +8,7 @@ $navigation = [
     '/' => 'Dashboard',
     '/pipeline' => 'Pipeline',
     '/document-files' => 'Dokument-Dateien',
+    '/image-files' => 'Bild-Dateien',
     '/sync-runs' => 'Laeufe',
     '/logs' => 'Logs',
     '/errors' => 'Fehler',

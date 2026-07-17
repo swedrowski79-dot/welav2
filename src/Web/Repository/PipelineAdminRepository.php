@@ -412,6 +412,45 @@ final class PipelineAdminRepository
         ], 'warning');
     }
 
+    public function retryQueueEntry(int $queueId): int
+    {
+        return $this->retryQueueEntries([
+            'id = :queue_id',
+            'status = :status',
+        ], [
+            ':queue_id' => $queueId,
+            ':status' => 'error',
+        ], 'Export-Queue-Eintrag wurde auf Retry gesetzt.', [
+            'action' => 'retry_queue_entry',
+            'queue_id' => $queueId,
+        ]);
+    }
+
+    public function retryQueueByEntityType(string $entityType): int
+    {
+        return $this->retryQueueEntries([
+            'entity_type = :entity_type',
+            'status = :status',
+        ], [
+            ':entity_type' => $entityType,
+            ':status' => 'error',
+        ], 'Fehlgeschlagene Export-Queue-Eintraege eines Entity-Typs wurden auf Retry gesetzt.', [
+            'action' => 'retry_queue_entity_type',
+            'entity_type' => $entityType,
+        ]);
+    }
+
+    public function retryAllQueueErrors(): int
+    {
+        return $this->retryQueueEntries([
+            'status = :status',
+        ], [
+            ':status' => 'error',
+        ], 'Alle fehlgeschlagenen Export-Queue-Eintraege wurden auf Retry gesetzt.', [
+            'action' => 'retry_queue_all_errors',
+        ]);
+    }
+
     private function buildQueueFilters(array $filters): array
     {
         $where = [];
@@ -644,5 +683,38 @@ final class PipelineAdminRepository
 
             throw $exception;
         }
+    }
+
+    private function retryQueueEntries(array $whereParts, array $params, string $message, array $context): int
+    {
+        $whereSql = implode(' AND ', array_filter($whereParts, static fn (string $part): bool => $part !== ''));
+        if ($whereSql === '') {
+            throw new \InvalidArgumentException('Retry-Filter darf nicht leer sein.');
+        }
+
+        $stmt = $this->stageDb->prepare(
+            "UPDATE `export_queue`
+             SET status = :retry_status,
+                 attempt_count = 0,
+                 claim_token = NULL,
+                 claimed_at = NULL,
+                 processed_at = NULL,
+                 last_error = NULL,
+                 available_at = NOW(),
+                 next_retry_at = NULL
+             WHERE {$whereSql}"
+        );
+        $stmt->execute([
+            ':retry_status' => 'pending',
+            ...$params,
+        ]);
+
+        $updated = $stmt->rowCount();
+        $this->logAdminAction($message, [
+            ...$context,
+            'updated_rows' => $updated,
+        ], 'warning');
+
+        return $updated;
     }
 }

@@ -609,21 +609,21 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
 
     private function resolvedCategoryId(array $product): ?string
     {
+        if ($this->isTruthy($product['is_slave'] ?? null)) {
+            $masterSku = trim((string) ($product['master_sku'] ?? ''));
+            if ($masterSku === '') {
+                return null;
+            }
+
+            return $this->resolvedCategoryIdForSku($masterSku, [$masterSku => true]);
+        }
+
         $categoryId = trim((string) ($product['category_afs_id'] ?? ''));
         if ($categoryId !== '') {
             return $categoryId;
         }
 
-        if (!$this->isTruthy($product['is_slave'] ?? null)) {
-            return null;
-        }
-
-        $masterSku = trim((string) ($product['master_sku'] ?? ''));
-        if ($masterSku === '') {
-            return null;
-        }
-
-        return $this->resolvedCategoryIdForSku($masterSku, [$masterSku => true]);
+        return null;
     }
 
     private function resolvedCategoryIdForSku(string $sku, array $visited): ?string
