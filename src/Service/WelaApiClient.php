@@ -117,6 +117,7 @@ final class WelaApiClient
     {
         $response = $this->request('sync_products_batch', [
             'items' => array_values($items),
+            'include_results_data' => false,
         ]);
         $data = $response['data'] ?? null;
 
@@ -125,6 +126,30 @@ final class WelaApiClient
         }
 
         return $data;
+    }
+
+    public function syncProductsBatchWithMeta(array $items): array
+    {
+        $metaResponse = $this->requestWithMeta('sync_products_batch', [
+            'items' => array_values($items),
+            'include_results_data' => false,
+        ]);
+        $response = $metaResponse['response'] ?? null;
+        $meta = $metaResponse['meta'] ?? null;
+
+        if (!is_array($response)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Produkt-Batch-Ergebnis.');
+        }
+
+        $data = $response['data'] ?? null;
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Produkt-Batch-Ergebnis.');
+        }
+
+        return [
+            'data' => $data,
+            'meta' => is_array($meta) ? $meta : [],
+        ];
     }
 
     public function syncCategory(array $payload): array
@@ -137,6 +162,43 @@ final class WelaApiClient
         }
 
         return $data;
+    }
+
+    public function syncCategoriesBatch(array $items): array
+    {
+        $response = $this->request('sync_categories_batch', [
+            'items' => array_values($items),
+        ]);
+        $data = $response['data'] ?? null;
+
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Kategorie-Batch-Ergebnis.');
+        }
+
+        return $data;
+    }
+
+    public function syncCategoriesBatchWithMeta(array $items): array
+    {
+        $metaResponse = $this->requestWithMeta('sync_categories_batch', [
+            'items' => array_values($items),
+        ]);
+        $response = $metaResponse['response'] ?? null;
+        $meta = $metaResponse['meta'] ?? null;
+
+        if (!is_array($response)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Kategorie-Batch-Ergebnis.');
+        }
+
+        $data = $response['data'] ?? null;
+        if (!is_array($data)) {
+            throw new RuntimeException('XT-API lieferte kein gueltiges Kategorie-Batch-Ergebnis.');
+        }
+
+        return [
+            'data' => $data,
+            'meta' => is_array($meta) ? $meta : [],
+        ];
     }
 
     public function refreshShopState(): array
@@ -197,6 +259,18 @@ final class WelaApiClient
 
     private function request(string $action, array $body): array
     {
+        $result = $this->requestWithMeta($action, $body);
+        $response = $result['response'] ?? null;
+
+        if (!is_array($response)) {
+            throw new RuntimeException('XT-API lieferte keine gueltige Antwort.');
+        }
+
+        return $response;
+    }
+
+    private function requestWithMeta(string $action, array $body): array
+    {
         if (!$this->isConfigured()) {
             throw new RuntimeException('XT-API ist nicht konfiguriert.');
         }
@@ -226,7 +300,9 @@ final class WelaApiClient
             ],
         ]);
 
+        $requestStartedAt = microtime(true);
         $responseBody = @file_get_contents($this->actionUrl($action), false, $context);
+        $requestDurationSeconds = microtime(true) - $requestStartedAt;
         $statusCode = $this->responseStatusCode($http_response_header ?? []);
 
         if ($responseBody === false) {
@@ -236,7 +312,19 @@ final class WelaApiClient
 
         $decoded = json_decode($responseBody, true);
         if (!is_array($decoded)) {
-            throw new RuntimeException('XT-API lieferte kein gueltiges JSON.');
+            $responsePreview = trim(substr($responseBody, 0, 500));
+            $previewSuffix = strlen($responseBody) > 500 ? '...' : '';
+            $message = 'XT-API lieferte kein gueltiges JSON.';
+
+            if ($statusCode > 0) {
+                $message .= ' HTTP-Status: ' . $statusCode . '.';
+            }
+
+            if ($responsePreview !== '') {
+                $message .= ' Antwortanfang: ' . $responsePreview . $previewSuffix;
+            }
+
+            throw new RuntimeException($message);
         }
 
         if ($statusCode >= 400 || !($decoded['ok'] ?? false)) {
@@ -244,7 +332,16 @@ final class WelaApiClient
             throw new RuntimeException((string) $message);
         }
 
-        return $decoded;
+        return [
+            'response' => $decoded,
+            'meta' => [
+                'action' => $action,
+                'status_code' => $statusCode,
+                'duration_seconds' => $requestDurationSeconds,
+                'payload_bytes' => strlen($encodedBody),
+                'response_bytes' => strlen($responseBody),
+            ],
+        ];
     }
 
     private function actionUrl(string $action): string

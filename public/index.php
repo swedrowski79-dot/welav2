@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Web\Controller\AttributeDictionaryController;
 use App\Web\Controller\DashboardController;
 use App\Web\Controller\DocumentFileController;
 use App\Web\Controller\ErrorController;
@@ -11,6 +12,7 @@ use App\Web\Controller\PipelineController;
 use App\Web\Controller\StageBrowserController;
 use App\Web\Controller\StatusController;
 use App\Web\Controller\SyncRunController;
+use App\Web\Controller\TranslationController;
 use App\Web\Core\Request;
 use App\Web\Core\Router;
 
@@ -24,9 +26,12 @@ $stageBrowserController = new StageBrowserController();
 $pipelineController = new PipelineController();
 $documentFileController = new DocumentFileController();
 $imageFileController = new ImageFileController();
+$translationController = new TranslationController();
+$attributeDictionaryController = new AttributeDictionaryController();
 
 $router->get('/', new DashboardController());
 $router->get('/pipeline', [$pipelineController, 'index']);
+$router->get('/pipeline/queue', [$pipelineController, 'queue']);
 $router->get('/document-files', [$documentFileController, 'index']);
 $router->get('/document-files/references', [$documentFileController, 'references']);
 $router->get('/document-files/browse', [$documentFileController, 'browse']);
@@ -47,6 +52,9 @@ $router->get('/pipeline/state', [$pipelineController, 'state']);
 $router->post('/pipeline/start', [$pipelineController, 'start']);
 $router->post('/pipeline/reset', [$pipelineController, 'reset']);
 $router->post('/pipeline/retry', [$pipelineController, 'retry']);
+$router->get('/translations', [$translationController, 'index']);
+$router->post('/translations/delete', [$translationController, 'delete']);
+$router->post('/attribute-dictionary/update', [$attributeDictionaryController, 'update']);
 $router->get('/sync-runs', [$syncRunController, 'index']);
 $router->get('/sync-runs/show', [$syncRunController, 'show']);
 $router->post('/sync-runs/start', [$syncRunController, 'start']);

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-final class XtMediaDocumentWriter extends AbstractXtWriter
+final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQueueWriter
 {
     private ?array $documentMediaRowsById = null;
     private ?array $documentMediaLinks = null;
@@ -90,6 +90,35 @@ final class XtMediaDocumentWriter extends AbstractXtWriter
                 $relationResult['primary_key_value'] ?? null
             );
         }
+    }
+
+    public function supportsBatch(string $entityType): bool
+    {
+        return $this->supports($entityType);
+    }
+
+    public function writeBatch(string $entityType, array $entries): array
+    {
+        if (!$this->supportsBatch($entityType)) {
+            return ['done' => [], 'failed' => []];
+        }
+
+        $done = [];
+        $failed = [];
+
+        foreach ($entries as $entry) {
+            $queueId = (int) ($entry['id'] ?? 0);
+
+            try {
+                $payload = $this->decodeQueuePayload($entry);
+                $this->write($entityType, $entry, $payload);
+                $done[$queueId] = true;
+            } catch (Throwable $exception) {
+                $failed[$queueId] = $exception;
+            }
+        }
+
+        return ['done' => $done, 'failed' => $failed];
     }
 
     private function definitionsForEntityType(string $entityType): array

@@ -5,6 +5,7 @@ require __DIR__ . '/src/Monitoring/SyncMonitor.php';
 require __DIR__ . '/src/Service/Normalizer.php';
 require __DIR__ . '/src/Service/StageWriter.php';
 require __DIR__ . '/src/Service/AttributeTranslationDictionaryService.php';
+require __DIR__ . '/src/Service/AttributeTranslationProjectionService.php';
 require __DIR__ . '/src/Service/ImportWorkflow.php';
 require __DIR__ . '/src/Service/AfsExtrasBootstrapService.php';
 require __DIR__ . '/src/Importer/AfsImporter.php';

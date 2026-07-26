@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
-final class XtCategoryWriter extends AbstractXtWriter
+final class XtCategoryWriter extends AbstractXtWriter implements XtBatchQueueWriter
 {
     private array $languageConfig;
     private StageCategoryMap $categoryMap;
     private array $seoUrlCache = [];
+    private int $categoryBatchRequestSize;
+    private int $categoryBatchRequestMaxPayloadBytes;
 
     public function __construct(array $sourcesConfig, array $xtWriteConfig)
     {
@@ -15,6 +17,9 @@ final class XtCategoryWriter extends AbstractXtWriter
         $languageConfig = require dirname(__DIR__, 2) . '/config/languages.php';
         $this->languageConfig = is_array($languageConfig) ? $languageConfig : [];
         $this->categoryMap = new StageCategoryMap($sourcesConfig);
+        $xtConnection = $sourcesConfig['sources']['xt']['connection'] ?? [];
+        $this->categoryBatchRequestSize = max(1, (int) ($xtConnection['category_batch_request_size'] ?? 25));
+        $this->categoryBatchRequestMaxPayloadBytes = max(0, (int) ($xtConnection['category_batch_request_max_payload_bytes'] ?? 0));
     }
 
     public function supports(string $entityType): bool
@@ -36,6 +41,150 @@ final class XtCategoryWriter extends AbstractXtWriter
             return;
         }
 
+        $prepared = $this->prepareCategorySyncPayload($entry, $payload);
+        $result = $this->client->syncCategory($prepared['sync_payload']);
+
+        $categoryId = $result['category_id'] ?? null;
+        if (is_int($categoryId) || is_string($categoryId)) {
+            $this->storeLookupValue('xt_categories', 'external_id', 'categories_id', $prepared['category_identity'], $categoryId);
+        }
+    }
+
+    public function supportsBatch(string $entityType): bool
+    {
+        return $this->supports($entityType);
+    }
+
+    public function writeBatch(string $entityType, array $entries): array
+    {
+        if (!$this->supportsBatch($entityType)) {
+            return ['done' => [], 'failed' => []];
+        }
+
+        $this->requireConfiguredClient('XT-API URL oder API-Key fehlt fuer Kategorie-Export.');
+
+        $done = [];
+        $failed = [];
+        $batchItems = [];
+
+        foreach ($entries as $entry) {
+            $queueId = (int) ($entry['id'] ?? 0);
+
+            try {
+                $payload = $this->decodeQueuePayload($entry);
+
+                if ($this->isOfflinePayload($payload)) {
+                    $this->write($entityType, $entry, $payload);
+                    $done[$queueId] = true;
+
+                    continue;
+                }
+
+                $prepared = $this->prepareCategorySyncPayload($entry, $payload);
+                $batchItems[] = [
+                    'queue_id' => $queueId,
+                    'entity_id' => trim((string) ($entry['entity_id'] ?? '')),
+                    'sync_payload' => $prepared['sync_payload'],
+                    'category_identity' => $prepared['category_identity'],
+                ];
+            } catch (Throwable $exception) {
+                $failed[$queueId] = $exception;
+            }
+        }
+
+        if ($batchItems === []) {
+            return ['done' => $done, 'failed' => $failed];
+        }
+
+        foreach ($this->buildCategoryBatchChunks($batchItems) as $chunk) {
+            $responseWithMeta = $this->client->syncCategoriesBatchWithMeta($chunk);
+            $response = is_array($responseWithMeta['data'] ?? null) ? $responseWithMeta['data'] : [];
+            $results = is_array($response['results'] ?? null) ? $response['results'] : [];
+
+            foreach ($results as $result) {
+                if (!is_array($result)) {
+                    continue;
+                }
+
+                $queueId = (int) ($result['queue_id'] ?? 0);
+                if ($queueId <= 0) {
+                    continue;
+                }
+
+                if (($result['ok'] ?? false) === true) {
+                    $done[$queueId] = true;
+                    unset($failed[$queueId]);
+
+                    $categoryId = $result['data']['category_id'] ?? null;
+                    $categoryIdentity = trim((string) ($result['category_identity'] ?? ''));
+                    if ((is_int($categoryId) || is_string($categoryId)) && $categoryIdentity !== '') {
+                        $this->storeLookupValue('xt_categories', 'external_id', 'categories_id', $categoryIdentity, $categoryId);
+                    }
+
+                    continue;
+                }
+
+                $failed[$queueId] = new RuntimeException((string) ($result['error'] ?? 'Kategorie-Batch-Export fehlgeschlagen.'));
+            }
+
+            foreach ($chunk as $item) {
+                $queueId = (int) ($item['queue_id'] ?? 0);
+                if ($queueId <= 0 || isset($done[$queueId]) || isset($failed[$queueId])) {
+                    continue;
+                }
+
+                $failed[$queueId] = new RuntimeException('Kategorie-Batch-Export lieferte kein Ergebnis fuer Queue-Eintrag.');
+            }
+        }
+
+        return ['done' => $done, 'failed' => $failed];
+    }
+
+    private function buildCategoryBatchChunks(array $batchItems): array
+    {
+        if ($batchItems === []) {
+            return [];
+        }
+
+        $chunks = [];
+        $currentChunk = [];
+        $currentSize = 0;
+
+        foreach ($batchItems as $item) {
+            $itemSize = $this->estimateCategoryBatchPayloadBytes([$item]);
+            $wouldExceedCount = $currentChunk !== [] && count($currentChunk) >= $this->categoryBatchRequestSize;
+            $wouldExceedPayload = $this->categoryBatchRequestMaxPayloadBytes > 0
+                && $currentChunk !== []
+                && ($currentSize + $itemSize) > $this->categoryBatchRequestMaxPayloadBytes;
+
+            if ($wouldExceedCount || $wouldExceedPayload) {
+                $chunks[] = $currentChunk;
+                $currentChunk = [];
+                $currentSize = 0;
+            }
+
+            $currentChunk[] = $item;
+            $currentSize += $itemSize;
+        }
+
+        if ($currentChunk !== []) {
+            $chunks[] = $currentChunk;
+        }
+
+        return $chunks;
+    }
+
+    private function estimateCategoryBatchPayloadBytes(array $items): int
+    {
+        $encoded = json_encode([
+            'items' => array_values($items),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return is_string($encoded) ? strlen($encoded) : 0;
+    }
+
+    private function prepareCategorySyncPayload(array $entry, array $payload): array
+    {
         $data = $payload['data'] ?? null;
         $category = is_array($data['category'] ?? null) ? $data['category'] : null;
 
@@ -49,25 +198,23 @@ final class XtCategoryWriter extends AbstractXtWriter
         $isInsert = !array_key_exists($categoryIdentity, $this->lookupMap('xt_categories', 'external_id', 'categories_id'));
         $translations = $this->normalizeTranslations($data['translations'] ?? []);
 
-        $result = $this->client->syncCategory([
-            'category' => [
-                'identity' => [
-                    (string) ($categoryDefinition['identity']['target_field'] ?? 'external_id') => $categoryIdentity,
+        return [
+            'category_identity' => $categoryIdentity,
+            'sync_payload' => [
+                'category' => [
+                    'identity' => [
+                        (string) ($categoryDefinition['identity']['target_field'] ?? 'external_id') => $categoryIdentity,
+                    ],
+                    'columns' => $this->resolveColumns(
+                        (array) ($categoryDefinition['columns'] ?? []),
+                        ['stage' => $category],
+                        $isInsert
+                    ),
                 ],
-                'columns' => $this->resolveColumns(
-                    (array) ($categoryDefinition['columns'] ?? []),
-                    ['stage' => $category],
-                    $isInsert
-                ),
+                'translations' => $this->buildTranslationWrites($category, $translations),
+                'seo_urls' => $this->buildSeoWrites($category, $translations, $isInsert),
             ],
-            'translations' => $this->buildTranslationWrites($category, $translations),
-            'seo_urls' => $this->buildSeoWrites($category, $translations, $isInsert),
-        ]);
-
-        $categoryId = $result['category_id'] ?? null;
-        if (is_int($categoryId) || is_string($categoryId)) {
-            $this->storeLookupValue('xt_categories', 'external_id', 'categories_id', $categoryIdentity, $categoryId);
-        }
+        ];
     }
 
     protected function resolveCalculatedExpression(string $expression, array $sources, bool $isInsert): mixed
@@ -133,7 +280,7 @@ final class XtCategoryWriter extends AbstractXtWriter
                 continue;
             }
 
-            $translation = $this->translationForLanguage($translations, $languageCode);
+            $translation = $this->categoryTranslationForLanguage($category, $translations, $languageCode);
             $columns = $this->resolveColumns(
                 $languageColumns,
                 [
@@ -170,7 +317,7 @@ final class XtCategoryWriter extends AbstractXtWriter
                 continue;
             }
 
-            $translation = $this->translationForLanguage($translations, $languageCode);
+            $translation = $this->categoryTranslationForLanguage($category, $translations, $languageCode);
             $columns = $this->resolveColumns(
                 $languageColumns,
                 [
@@ -290,6 +437,32 @@ final class XtCategoryWriter extends AbstractXtWriter
         }
 
         return [];
+    }
+
+    private function categoryTranslationForLanguage(array $category, array $translations, string $languageCode): array
+    {
+        $translation = $this->translationForLanguage($translations, $languageCode);
+
+        $nameDefault = trim((string) ($category['name_default'] ?? ''));
+        $descriptionDefault = trim((string) ($category['description_default'] ?? ''));
+
+        if (($translation['name'] ?? null) === null || trim((string) ($translation['name'] ?? '')) === '') {
+            $translation['name'] = $nameDefault;
+        }
+
+        if (($translation['description'] ?? null) === null || trim((string) ($translation['description'] ?? '')) === '') {
+            $translation['description'] = $descriptionDefault;
+        }
+
+        if (($translation['meta_title'] ?? null) === null || trim((string) ($translation['meta_title'] ?? '')) === '') {
+            $translation['meta_title'] = $translation['name'] ?? $nameDefault;
+        }
+
+        if (($translation['meta_description'] ?? null) === null || trim((string) ($translation['meta_description'] ?? '')) === '') {
+            $translation['meta_description'] = $translation['description'] ?? $descriptionDefault;
+        }
+
+        return $translation;
     }
 
     private function fallbackChain(string $languageCode): array

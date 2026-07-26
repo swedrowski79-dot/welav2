@@ -81,6 +81,39 @@
     </details>
 <?php endif; ?>
 
+<?php
+$fullPipelineJob = null;
+foreach ($pipelineSections as $section) {
+    foreach (($section['jobs'] ?? []) as $job) {
+        if (($job['name'] ?? '') === 'full_pipeline') {
+            $fullPipelineJob = $job;
+            break 2;
+        }
+    }
+}
+$standardFlow = is_array($fullPipelineJob['contains'] ?? null) ? $fullPipelineJob['contains'] : [];
+?>
+
+<?php if ($standardFlow !== []): ?>
+    <div class="panel-card p-3 p-lg-4 mb-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3">
+            <div>
+                <h2 class="h5 mb-1">Standardablauf</h2>
+                <div class="small text-secondary">Wird mit <span class="fw-semibold">Full Pipeline</span> vollständig und nacheinander ausgeführt.</div>
+            </div>
+            <span class="badge text-bg-dark align-self-lg-center"><?= Html::escape(count($standardFlow)) ?> Schritte</span>
+        </div>
+        <div class="pipeline-flow" aria-label="Schritte der Full Pipeline">
+            <?php foreach ($standardFlow as $stepIndex => $stepLabel): ?>
+                <div class="pipeline-flow-step">
+                    <span class="pipeline-flow-number"><?= Html::escape($stepIndex + 1) ?></span>
+                    <span><?= Html::escape($stepLabel) ?></span>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
 <div class="row g-4 mb-4">
     <div class="col-12 col-xl-7">
         <div class="panel-card p-4 h-100">
@@ -94,13 +127,34 @@
                 </div>
             </div>
             <?php foreach ($pipelineSections as $section): ?>
-                <div class="border rounded-4 p-3 p-lg-4 mb-3 bg-light-subtle">
-                    <div class="fw-semibold mb-1"><?= Html::escape($section['title']) ?></div>
-                    <div class="small text-secondary mb-3"><?= Html::escape($section['description']) ?></div>
+                <?php $isPrimarySection = (($section['jobs'][0]['name'] ?? '') === 'full_pipeline'); ?>
+                <details class="details-card pipeline-section border rounded-4 mb-3 bg-light-subtle" <?= $isPrimarySection ? 'open' : '' ?>>
+                    <summary>
+                        <div>
+                            <div class="fw-semibold mb-1"><?= Html::escape($section['title']) ?></div>
+                            <div class="small text-secondary"><?= Html::escape($section['description']) ?></div>
+                        </div>
+                        <span class="badge <?= $isPrimarySection ? 'text-bg-primary' : 'text-bg-light border text-dark' ?>">
+                            <?= $isPrimarySection ? 'Empfohlen' : 'Manuell' ?>
+                        </span>
+                    </summary>
+                    <div class="p-3 p-lg-4">
                     <div class="row g-3">
                         <?php foreach ($section['jobs'] as $job): ?>
-                            <div class="col-12 col-md-6">
+                            <div class="col-12 <?= !empty($job['contains']) ? 'col-md-12' : 'col-md-6' ?>">
                                 <div class="border rounded-4 p-3 h-100 bg-white">
+                                    <?php $includedSteps = is_array($job['contains'] ?? null) ? $job['contains'] : []; ?>
+                                    <?php if ($includedSteps !== []): ?>
+                                        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                            <span class="badge text-bg-primary">Sammelaktion</span>
+                                            <span class="small text-secondary"><?= Html::escape(count($includedSteps)) ?> Teilschritte</span>
+                                        </div>
+                                        <div class="small text-secondary mb-3">
+                                            Enthält: <?= Html::escape(implode(' → ', $includedSteps)) ?>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="small text-secondary mb-3"><span class="badge text-bg-light border text-dark">Einzelschritt</span></div>
+                                    <?php endif; ?>
                                     <form method="post" action="/pipeline/start" class="mb-2">
                                         <input type="hidden" name="job" value="<?= Html::escape($job['name']) ?>">
                                         <?php if (in_array(($job['name'] ?? ''), ['export_queue_worker', 'full_pipeline'], true)): ?>
@@ -115,6 +169,17 @@
                                                 value="<?= Html::escape($exportWorkerBatchSize ?? '') ?>"
                                                 placeholder="persistenter Wert"
                                             >
+                                            <label class="form-label small text-secondary" for="worker_count_<?= Html::escape($job['name']) ?>">Export-Worker Anzahl</label>
+                                            <input
+                                                class="form-control mb-2"
+                                                id="worker_count_<?= Html::escape($job['name']) ?>"
+                                                name="worker_count"
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                                value="<?= Html::escape($exportWorkerCount ?? '1') ?>"
+                                                placeholder="persistenter Wert"
+                                            >
                                         <?php endif; ?>
                                         <button class="btn <?= Html::escape($job['button_class']) ?> w-100" type="submit"><?= Html::escape($job['label']) ?></button>
                                     </form>
@@ -123,7 +188,8 @@
                             </div>
                         <?php endforeach; ?>
                     </div>
-                </div>
+                    </div>
+                </details>
             <?php endforeach; ?>
         </div>
     </div>
@@ -155,6 +221,44 @@
     </div>
 </div>
 
+<div class="panel-card p-4 mb-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+        <div>
+            <h2 class="h5 mb-1">Export Queue verwalten</h2>
+            <div class="small text-secondary">Queue-Details, Retry-Aktionen, Delta-/Worker-Status und Exportprobleme sind auf einer eigenen Seite gebuendelt.</div>
+        </div>
+        <a class="btn btn-outline-primary" href="/pipeline/queue">Zur Export Queue</a>
+    </div>
+</div>
+
+<details class="panel-card details-card mb-4 border border-danger-subtle">
+    <summary>
+        <div>
+            <div class="fw-semibold text-danger">Erweiterte Wartung</div>
+            <div class="small text-secondary mt-1">Reset-Aktionen fuer Queue, Stage, Mirror und Delta-State.</div>
+        </div>
+    </summary>
+    <div class="p-4">
+        <div class="small text-secondary mb-3">Diese Aktionen loeschen Daten. Sie sind deshalb bewusst nicht Teil der normalen Pipeline-Steuerung.</div>
+        <div class="d-flex flex-wrap gap-2">
+            <?php foreach ([
+                ['action' => 'queue', 'label' => 'Queue leeren', 'warning' => 'Alle Export-Queue-Eintraege werden geloescht. Fortfahren?'],
+                ['action' => 'mirror', 'label' => 'Mirror leeren', 'warning' => 'Alle xt_mirror_* Tabellen werden geleert. Fortfahren?'],
+                ['action' => 'delta_state', 'label' => 'Delta-State leeren', 'warning' => 'Der komplette Delta-State wird geloescht. Fortfahren?'],
+                ['action' => 'stage', 'label' => 'Stage leeren', 'warning' => 'Alle stage_* Tabellen werden geleert. Fortfahren?'],
+                ['action' => 'full', 'label' => 'Full Reset', 'warning' => 'Queue, Stage und Delta-State werden komplett zurueckgesetzt. Fortfahren?'],
+            ] as $reset): ?>
+                <form method="post" action="/pipeline/reset" onsubmit="return confirm('<?= Html::escape($reset['warning']) ?>');">
+                    <input type="hidden" name="action" value="<?= Html::escape($reset['action']) ?>">
+                    <input type="hidden" name="confirmed" value="yes">
+                    <button class="btn btn-sm btn-outline-danger" type="submit"><?= Html::escape($reset['label']) ?></button>
+                </form>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</details>
+
+<?php if (!empty($showPipelineDetails)): ?>
 <div class="row g-4 mb-4">
     <div class="col-12 col-xl-6">
         <div class="panel-card p-4 h-100">
@@ -682,3 +786,4 @@
         <?php $path = '/pipeline'; $query = ['entity_type' => $filters['entity_type'], 'status' => $filters['status'], 'action' => $filters['action'], 'per_page' => $paginator->perPage]; require dirname(__DIR__) . '/partials/pagination.php'; ?>
     </div>
 </div>
+<?php endif; ?>

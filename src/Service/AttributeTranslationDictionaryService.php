@@ -6,6 +6,7 @@ final class AttributeTranslationDictionaryService
 {
     private const LANGUAGES = ['de', 'en', 'fr', 'nl'];
     private const TABLE = 'attribute_translations';
+    private const LEGACY_BACKUP_TABLE = 'attribute_translations_legacy_20260717';
 
     public function __construct(private PDO $stageDb, private PDO $extraDb)
     {
@@ -14,139 +15,450 @@ final class AttributeTranslationDictionaryService
     public function sync(): array
     {
         $this->ensureSchema();
+        $migrationStats = $this->migrateLegacyTableIfNeeded();
 
-        return [
-            'inserted_rows' => $this->seedFromRawAfsArticles(),
-        ];
+        $currentTerms = $this->fetchCurrentTermsFromRawAfsArticles();
+        $existingRows = $this->fetchExistingDictionaryRows();
+
+        return array_merge($migrationStats, [
+            'inserted_rows' => $this->insertMissingTerms($currentTerms, $existingRows),
+            'reactivated_rows' => $this->reactivateExistingTerms($currentTerms, $existingRows),
+            'deactivated_rows' => $this->deactivateMissingTerms($currentTerms, $existingRows),
+            'active_terms' => count($currentTerms),
+        ]);
     }
 
     private function ensureSchema(): void
     {
+        if (!$this->tableExists(self::TABLE)) {
+            $this->createDictionaryTable();
+
+            return;
+        }
+
+        if ($this->columnExists(self::TABLE, 'source_text')) {
+            if (!$this->columnExists(self::TABLE, 'is_active')) {
+                $this->extraDb->exec(
+                    'ALTER TABLE `' . self::TABLE . '` ADD COLUMN `is_active` TINYINT(1) NOT NULL DEFAULT 1 AFTER `source_directory`'
+                );
+            }
+
+            return;
+        }
+
+        if (!$this->columnExists(self::TABLE, 'is_active')) {
+            $this->extraDb->exec(
+                'ALTER TABLE `' . self::TABLE . '` ADD COLUMN `is_active` TINYINT(1) NOT NULL DEFAULT 1 AFTER `source_directory`'
+            );
+        }
+    }
+
+    private function migrateLegacyTableIfNeeded(): array
+    {
+        if (!$this->tableExists(self::TABLE) || $this->columnExists(self::TABLE, 'source_text')) {
+            return [
+                'legacy_migrated_rows' => 0,
+                'legacy_dictionary_terms' => 0,
+            ];
+        }
+
+        $legacyRows = $this->fetchLegacyRows();
+        $legacyEntries = $this->buildLegacyDictionaryEntries($legacyRows);
+
+        if (!$this->tableExists(self::LEGACY_BACKUP_TABLE)) {
+            $this->extraDb->exec(
+                'CREATE TABLE `' . self::LEGACY_BACKUP_TABLE . '` LIKE `' . self::TABLE . '`'
+            );
+            $this->extraDb->exec(
+                'INSERT INTO `' . self::LEGACY_BACKUP_TABLE . '` SELECT * FROM `' . self::TABLE . '`'
+            );
+        }
+
+        $this->extraDb->exec('DROP TABLE `' . self::TABLE . '`');
+        $this->createDictionaryTable();
+        $this->insertDictionaryEntries($legacyEntries);
+
+        return [
+            'legacy_migrated_rows' => count($legacyRows),
+            'legacy_dictionary_terms' => count($legacyEntries),
+        ];
+    }
+
+    private function createDictionaryTable(): void
+    {
         $this->extraDb->exec(
             'CREATE TABLE IF NOT EXISTS `' . self::TABLE . '` (
-                `id` INT NOT NULL PRIMARY KEY,
-                `article_id` INT NULL,
-                `article_number` VARCHAR(255) NULL,
-                `sort_order` INT NULL,
-                `language` VARCHAR(10) NULL,
-                `attribute_name` VARCHAR(255) NULL,
-                `attribute_value` VARCHAR(255) NULL,
+                `id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `source_text` VARCHAR(255) NOT NULL,
+                `normalized_key` VARCHAR(255) NOT NULL,
+                `de` VARCHAR(255) NULL,
+                `en` VARCHAR(255) NULL,
+                `fr` VARCHAR(255) NULL,
+                `nl` VARCHAR(255) NULL,
                 `source_directory` VARCHAR(255) NULL,
-                KEY `idx_attribute_translations_article_id` (`article_id`),
-                KEY `idx_attribute_translations_article_number` (`article_number`),
-                KEY `idx_attribute_translations_language` (`language`)
+                `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                UNIQUE KEY `uniq_attribute_translations_normalized_key` (`normalized_key`),
+                KEY `idx_attribute_translations_is_active` (`is_active`),
+                KEY `idx_attribute_translations_source_text` (`source_text`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
         );
     }
 
-    private function seedFromRawAfsArticles(): int
+    private function fetchLegacyRows(): array
     {
-        $attributeRows = $this->fetchRawAfsAttributeRows();
-        $existingRows = $this->fetchExistingRowsByArticleAndSort();
-        $count = 0;
-        $nextId = $this->nextInsertId();
-
-        foreach ($attributeRows as $attributeRow) {
-            $articleId = (int) ($attributeRow['article_id'] ?? 0);
-            $sortOrder = (int) ($attributeRow['sort_order'] ?? 0);
-            if ($articleId <= 0 || $sortOrder <= 0) {
-                continue;
-            }
-            foreach (self::LANGUAGES as $languageCode) {
-                $key = $articleId . '|' . $sortOrder . '|' . $languageCode;
-                if (isset($existingRows[$key])) {
-                    continue;
-                }
-
-                $this->insertAttributeRow($nextId++, $attributeRow, $languageCode);
-                $existingRows[$key] = true;
-                $count++;
-            }
-        }
-
-        return $count;
-    }
-
-    private function fetchRawAfsAttributeRows(): array
-    {
-        $stmt = $this->stageDb->query(
-            "SELECT *
-             FROM (
-                 SELECT `afs_artikel_id` AS article_id, `sku` AS article_number, 1 AS sort_order, TRIM(`attribute_name1`) AS attribute_name, TRIM(COALESCE(`attribute_value1`, '')) AS attribute_value FROM `raw_afs_articles`
-                 UNION ALL
-                 SELECT `afs_artikel_id` AS article_id, `sku` AS article_number, 2 AS sort_order, TRIM(`attribute_name2`) AS attribute_name, TRIM(COALESCE(`attribute_value2`, '')) AS attribute_value FROM `raw_afs_articles`
-                 UNION ALL
-                 SELECT `afs_artikel_id` AS article_id, `sku` AS article_number, 3 AS sort_order, TRIM(`attribute_name3`) AS attribute_name, TRIM(COALESCE(`attribute_value3`, '')) AS attribute_value FROM `raw_afs_articles`
-                 UNION ALL
-                 SELECT `afs_artikel_id` AS article_id, `sku` AS article_number, 4 AS sort_order, TRIM(`attribute_name4`) AS attribute_name, TRIM(COALESCE(`attribute_value4`, '')) AS attribute_value FROM `raw_afs_articles`
-             ) names
-              WHERE NULLIF(attribute_name, '') IS NOT NULL
-               AND NULLIF(attribute_value, '') IS NOT NULL
-             ORDER BY article_id ASC, sort_order ASC"
+        $stmt = $this->extraDb->query(
+            'SELECT `article_id`, `sort_order`, `language`, `attribute_name`, `attribute_value`, `source_directory`, `is_active`
+             FROM `' . self::TABLE . '`
+             ORDER BY `article_id` ASC, `sort_order` ASC, `language` ASC'
         );
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    private function fetchExistingRowsByArticleAndSort(): array
+    private function buildLegacyDictionaryEntries(array $legacyRows): array
     {
-        $stmt = $this->extraDb->query(
-            'SELECT article_id, sort_order, language
-             FROM `' . self::TABLE . '`
-             WHERE article_id IS NOT NULL
-               AND sort_order IS NOT NULL
-               AND language IS NOT NULL'
-        );
+        $grouped = [];
 
-        $existing = [];
+        foreach ($legacyRows as $row) {
+            $articleId = (int) ($row['article_id'] ?? 0);
+            $sortOrder = (int) ($row['sort_order'] ?? 0);
+            $languageCode = strtolower(trim((string) ($row['language'] ?? '')));
 
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $existing[(int) $row['article_id'] . '|' . (int) $row['sort_order'] . '|' . strtolower((string) $row['language'])] = true;
+            if ($articleId <= 0 || $sortOrder <= 0 || !in_array($languageCode, self::LANGUAGES, true)) {
+                continue;
+            }
+
+            $grouped[$articleId . '|' . $sortOrder][$languageCode] = $row;
         }
 
-        return $existing;
+        $entries = [];
+
+        foreach ($grouped as $translations) {
+            $baseRow = $translations['de'] ?? reset($translations);
+            if (!is_array($baseRow)) {
+                continue;
+            }
+
+            $sourceName = $this->normalizeString($baseRow['attribute_name'] ?? null);
+            $sourceValue = $this->normalizeString($baseRow['attribute_value'] ?? null);
+            $isActive = $this->groupIsActive($translations);
+            $sourceDirectory = $this->normalizeString($baseRow['source_directory'] ?? null) ?? 'legacy_migration';
+
+            if ($sourceName !== null) {
+                $entries = $this->mergeLegacyEntry($entries, $sourceName, $translations, 'attribute_name', $sourceDirectory, $isActive);
+            }
+
+            if ($sourceValue !== null) {
+                $entries = $this->mergeLegacyEntry($entries, $sourceValue, $translations, 'attribute_value', $sourceDirectory, $isActive);
+            }
+        }
+
+        return array_values($entries);
     }
 
-    private function nextInsertId(): int
-    {
-        $stmt = $this->extraDb->query('SELECT COALESCE(MAX(id), 0) + 1 FROM `' . self::TABLE . '`');
+    private function mergeLegacyEntry(
+        array $entries,
+        string $sourceText,
+        array $translations,
+        string $field,
+        string $sourceDirectory,
+        int $isActive
+    ): array {
+        $normalizedKey = $this->normalizedKey($sourceText);
+        if ($normalizedKey === '') {
+            return $entries;
+        }
 
-        return (int) $stmt->fetchColumn();
+        if (!isset($entries[$normalizedKey])) {
+            $entries[$normalizedKey] = [
+                'source_text' => $sourceText,
+                'normalized_key' => $normalizedKey,
+                'de' => $sourceText,
+                'en' => null,
+                'fr' => null,
+                'nl' => null,
+                'source_directory' => $sourceDirectory,
+                'is_active' => $isActive,
+            ];
+        }
+
+        foreach (self::LANGUAGES as $languageCode) {
+            $row = $translations[$languageCode] ?? null;
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $translatedText = $this->normalizeString($row[$field] ?? null);
+            if ($translatedText === null) {
+                continue;
+            }
+
+            if ($entries[$normalizedKey][$languageCode] === null || $entries[$normalizedKey][$languageCode] === '') {
+                $entries[$normalizedKey][$languageCode] = $translatedText;
+            }
+        }
+
+        if (($entries[$normalizedKey]['source_directory'] ?? null) === null) {
+            $entries[$normalizedKey]['source_directory'] = $sourceDirectory;
+        }
+        $entries[$normalizedKey]['is_active'] = max((int) ($entries[$normalizedKey]['is_active'] ?? 0), $isActive);
+
+        return $entries;
     }
 
-    private function insertAttributeRow(int $id, array $attributeRow, string $languageCode): void
+    private function groupIsActive(array $translations): int
     {
+        foreach ($translations as $row) {
+            if ((int) ($row['is_active'] ?? 1) === 1) {
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    private function insertDictionaryEntries(array $entries): void
+    {
+        if ($entries === []) {
+            return;
+        }
+
         $stmt = $this->extraDb->prepare(
-            "INSERT INTO `" . self::TABLE . "` (
-                `id`,
-                `article_id`,
-                `article_number`,
-                `sort_order`,
-                `language`,
-                `attribute_name`,
-                `attribute_value`,
-                `source_directory`
+            'INSERT INTO `' . self::TABLE . '` (
+                `source_text`,
+                `normalized_key`,
+                `de`,
+                `en`,
+                `fr`,
+                `nl`,
+                `source_directory`,
+                `is_active`
             ) VALUES (
-                :id,
-                :article_id,
-                :article_number,
-                :sort_order,
-                :language,
-                :attribute_name,
-                :attribute_value,
-                :source_directory
-            )"
+                :source_text,
+                :normalized_key,
+                :de,
+                :en,
+                :fr,
+                :nl,
+                :source_directory,
+                :is_active
+            )'
         );
 
-        $stmt->execute([
-            ':id' => $id,
-            ':article_id' => (int) ($attributeRow['article_id'] ?? 0),
-            ':article_number' => (string) ($attributeRow['article_number'] ?? ''),
-            ':sort_order' => (int) ($attributeRow['sort_order'] ?? 0),
-            ':language' => $languageCode,
-            ':attribute_name' => $languageCode === 'de' ? (string) ($attributeRow['attribute_name'] ?? '') : '',
-            ':attribute_value' => $languageCode === 'de' ? (string) ($attributeRow['attribute_value'] ?? '') : '',
-            ':source_directory' => 'afs_auto'
-        ]);
+        foreach ($entries as $entry) {
+            $stmt->execute([
+                ':source_text' => $entry['source_text'] ?? '',
+                ':normalized_key' => $entry['normalized_key'] ?? '',
+                ':de' => $entry['de'] ?? null,
+                ':en' => $entry['en'] ?? null,
+                ':fr' => $entry['fr'] ?? null,
+                ':nl' => $entry['nl'] ?? null,
+                ':source_directory' => $entry['source_directory'] ?? null,
+                ':is_active' => (int) ($entry['is_active'] ?? 1),
+            ]);
+        }
+    }
+
+    private function fetchCurrentTermsFromRawAfsArticles(): array
+    {
+        $stmt = $this->stageDb->query(
+            "SELECT `attribute_name1`, `attribute_name2`, `attribute_name3`, `attribute_name4`,
+                    `attribute_value1`, `attribute_value2`, `attribute_value3`, `attribute_value4`
+             FROM `raw_afs_articles`"
+        );
+
+        $terms = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            foreach ([
+                'attribute_name1',
+                'attribute_name2',
+                'attribute_name3',
+                'attribute_name4',
+                'attribute_value1',
+                'attribute_value2',
+                'attribute_value3',
+                'attribute_value4',
+            ] as $field) {
+                $sourceText = $this->normalizeString($row[$field] ?? null);
+                if ($sourceText === null) {
+                    continue;
+                }
+
+                $normalizedKey = $this->normalizedKey($sourceText);
+                if ($normalizedKey === '' || isset($terms[$normalizedKey])) {
+                    continue;
+                }
+
+                $terms[$normalizedKey] = [
+                    'source_text' => $sourceText,
+                    'normalized_key' => $normalizedKey,
+                    'source_directory' => 'afs_auto',
+                ];
+            }
+        }
+
+        return $terms;
+    }
+
+    private function fetchExistingDictionaryRows(): array
+    {
+        $stmt = $this->extraDb->query(
+            'SELECT `id`, `source_text`, `normalized_key`, `de`, `en`, `fr`, `nl`, `source_directory`, `is_active`
+             FROM `' . self::TABLE . '`'
+        );
+
+        $rows = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $normalizedKey = (string) ($row['normalized_key'] ?? '');
+            if ($normalizedKey === '') {
+                continue;
+            }
+
+            $rows[$normalizedKey] = $row;
+        }
+
+        return $rows;
+    }
+
+    private function insertMissingTerms(array $currentTerms, array $existingRows): int
+    {
+        $count = 0;
+        $stmt = $this->extraDb->prepare(
+            'INSERT INTO `' . self::TABLE . '` (
+                `source_text`,
+                `normalized_key`,
+                `de`,
+                `source_directory`,
+                `is_active`
+            ) VALUES (
+                :source_text,
+                :normalized_key,
+                :de,
+                :source_directory,
+                1
+            )'
+        );
+
+        foreach ($currentTerms as $normalizedKey => $term) {
+            if (isset($existingRows[$normalizedKey])) {
+                continue;
+            }
+
+            $stmt->execute([
+                ':source_text' => $term['source_text'] ?? '',
+                ':normalized_key' => $normalizedKey,
+                ':de' => $term['source_text'] ?? '',
+                ':source_directory' => $term['source_directory'] ?? 'afs_auto',
+            ]);
+            $count += $stmt->rowCount() > 0 ? 1 : 0;
+        }
+
+        return $count;
+    }
+
+    private function reactivateExistingTerms(array $currentTerms, array $existingRows): int
+    {
+        $count = 0;
+        $stmt = $this->extraDb->prepare(
+            'UPDATE `' . self::TABLE . '`
+             SET `source_text` = :source_text,
+                 `de` = CASE
+                     WHEN `de` IS NULL OR TRIM(`de`) = "" THEN :de
+                     ELSE `de`
+                 END,
+                 `source_directory` = :source_directory,
+                 `is_active` = 1
+             WHERE `id` = :id'
+        );
+
+        foreach ($currentTerms as $normalizedKey => $term) {
+            $existingRow = $existingRows[$normalizedKey] ?? null;
+            if (!is_array($existingRow)) {
+                continue;
+            }
+
+            $needsUpdate = (int) ($existingRow['is_active'] ?? 1) !== 1
+                || (string) ($existingRow['source_text'] ?? '') !== (string) ($term['source_text'] ?? '')
+                || (string) ($existingRow['source_directory'] ?? '') !== (string) ($term['source_directory'] ?? '');
+
+            if (!$needsUpdate && trim((string) ($existingRow['de'] ?? '')) !== '') {
+                continue;
+            }
+
+            $stmt->execute([
+                ':source_text' => $term['source_text'] ?? '',
+                ':de' => $term['source_text'] ?? '',
+                ':source_directory' => $term['source_directory'] ?? 'afs_auto',
+                ':id' => (int) ($existingRow['id'] ?? 0),
+            ]);
+            $count += $stmt->rowCount() > 0 ? 1 : 0;
+        }
+
+        return $count;
+    }
+
+    private function deactivateMissingTerms(array $currentTerms, array $existingRows): int
+    {
+        $count = 0;
+        $currentLookup = array_fill_keys(array_keys($currentTerms), true);
+        $stmt = $this->extraDb->prepare(
+            'UPDATE `' . self::TABLE . '`
+             SET `is_active` = 0
+             WHERE `id` = :id'
+        );
+
+        foreach ($existingRows as $normalizedKey => $existingRow) {
+            if (isset($currentLookup[$normalizedKey])) {
+                continue;
+            }
+
+            if ((int) ($existingRow['is_active'] ?? 1) === 0) {
+                continue;
+            }
+
+            $stmt->execute([
+                ':id' => (int) ($existingRow['id'] ?? 0),
+            ]);
+            $count += $stmt->rowCount() > 0 ? 1 : 0;
+        }
+
+        return $count;
+    }
+
+    private function normalizedKey(string $value): string
+    {
+        $normalized = trim(mb_strtolower($value));
+        $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
+
+        return $normalized;
+    }
+
+    private function normalizeString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $stmt = $this->extraDb->prepare('SHOW TABLES LIKE :table');
+        $stmt->execute([':table' => $table]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        $stmt = $this->extraDb->query('SHOW COLUMNS FROM `' . $table . '`');
+        $columns = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        return in_array($column, $columns, true);
     }
 }

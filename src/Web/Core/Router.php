@@ -30,6 +30,16 @@ final class Router
 
         $result = $handler($request);
 
+        if (headers_sent()) {
+            return;
+        }
+
+        foreach (headers_list() as $header) {
+            if (stripos($header, 'Location:') === 0) {
+                return;
+            }
+        }
+
         if (is_string($result)) {
             Response::html($result);
         }

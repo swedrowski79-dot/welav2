@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../Database/ConnectionFactory.php';
+require_once __DIR__ . '/../Monitoring/SyncMonitor.php';
 require_once __DIR__ . '/../Service/PipelineConfig.php';
 require_once __DIR__ . '/../Service/WelaApiClient.php';
 

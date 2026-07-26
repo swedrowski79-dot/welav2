@@ -9,6 +9,7 @@ return [
                 'run_type_label' => 'Import',
                 'button_class' => 'btn-primary',
                 'help' => 'Laedt alle aktuellen Importquellen in die RAW-Tabellen.',
+                'contains' => ['Produkt-Import', 'Kategorie-Import'],
             ],
             'import_products' => [
                 'script' => 'run_import_products.php',
@@ -37,6 +38,7 @@ return [
                 'run_type_label' => 'Expand + Delta',
                 'button_class' => 'btn-outline-secondary',
                 'help' => 'Erzeugt expandierte Stage-Daten und startet im selben Lauf die Delta-Berechnung.',
+                'contains' => ['Stage-Expand', 'Delta-Berechnung und Queue-Befuellung'],
             ],
             'xt_mirror' => [
                 'script' => 'run_xt_mirror.php',
@@ -72,9 +74,23 @@ return [
                      'expand',
                      'export_queue_worker',
                  ],
+                 'contains' => [
+                     'Import aller Produkte und Kategorien',
+                     'Merge der RAW-Daten in die Stage',
+                     'XT Mirror Refresh',
+                     'Expand inklusive Delta und Queue-Befuellung',
+                     'Export Worker',
+                 ],
              ],
         ],
         'sections' => [
+            [
+                'title' => 'Full Pipeline (empfohlen)',
+                'description' => 'Sammelaktion: startet die komplette Standardreihenfolge von Import bis Export in einem Hintergrundlauf.',
+                'jobs' => [
+                    'full_pipeline',
+                ],
+            ],
             [
                 'title' => '1. Import (AFS -> RAW)',
                 'description' => 'Importiert Produkt- und Kategoriequellen in die RAW-Tabellen.',
@@ -85,39 +101,42 @@ return [
                 ],
             ],
             [
-                'title' => '2. Stage-Aufbau',
-                'description' => 'Fuehrt Merge und Expand fuer die internen Stage-Tabellen aus.',
+                'title' => '2. Merge (RAW -> Stage)',
+                'description' => 'Fuehrt die importierten RAW-Quellen zu den Stage-Grunddaten zusammen.',
                 'jobs' => [
                     'merge',
-                    'expand',
                 ],
             ],
             [
-                'title' => '3. XT Mirror',
+                'title' => '3. XT Mirror (XT -> lokaler Abgleich)',
                 'description' => 'Liest den aktuellen XT-Zustand in die lokalen Mirror-Tabellen fuer Abgleich und Analyse.',
                 'jobs' => [
                     'xt_mirror',
                 ],
             ],
             [
-                'title' => '4. Delta & Export',
-                'description' => 'Befuellt die Export Queue und verarbeitet die konfigurierten Export-Eintraege.',
+                'title' => '4. Expand & Delta',
+                'description' => 'Der Expand-Lauf besteht aus zwei Teilschritten: Stage-Daten erweitern und danach die Export Queue per Delta berechnen.',
                 'jobs' => [
+                    'expand',
                     'delta',
-                    'export_queue_worker',
                 ],
             ],
             [
-                'title' => '5. Komplettlauf',
-                'description' => 'Fuehrt die aktive End-to-End-Sequenz aus der Konfiguration aus.',
+                'title' => '5. Export',
+                'description' => 'Der Worker verarbeitet die zuvor durch Delta erzeugten Queue-Eintraege und schreibt sie nach XT.',
                 'jobs' => [
-                    'full_pipeline',
+                    'export_queue_worker',
                 ],
             ],
         ],
         'run_type_labels' => [
             'delta_products' => 'Delta',
             'xt_snapshot' => 'XT Mirror Refresh',
+            'image_scan' => 'Bild-Scan',
+            'image_upload' => 'Bild-Upload',
+            'document_scan' => 'Dokument-Scan',
+            'document_upload' => 'Dokument-Upload',
         ],
     ],
 ];

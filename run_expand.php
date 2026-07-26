@@ -11,6 +11,7 @@ $configExpand = require __DIR__ . '/config/expand.php';
 $configDelta = require __DIR__ . '/config/delta.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
+$extraDb = ConnectionFactory::create($configSources['sources']['extra']);
 
 $monitor = new SyncMonitor($stageDb);
 $runId = $monitor->start('expand', [
@@ -21,7 +22,7 @@ $expandService = new ExpandService($stageDb, $configExpand, $monitor, $runId);
 try {
     $monitor->log($runId, 'info', 'Expand gestartet.');
     $expandStats = $expandService->run();
-    $deltaService = new DeltaRunnerService($stageDb, $configDelta, $monitor, $runId);
+    $deltaService = new DeltaRunnerService($stageDb, $extraDb, $configDelta, $monitor, $runId);
     $deltaStats = $deltaService->run();
 
     $expandedRecords = 0;

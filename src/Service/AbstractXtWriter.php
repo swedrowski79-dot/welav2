@@ -6,11 +6,13 @@ abstract class AbstractXtWriter implements XtQueueWriter
 {
     protected array $writeConfig;
     protected WelaApiClient $client;
+    /** @var null|callable(string, array): void */
+    protected $performanceLogger;
 
     private array $lookupCaches = [];
     private ?array $seoUrlIndex = null;
 
-    public function __construct(array $sourcesConfig, array $xtWriteConfig)
+    public function __construct(array $sourcesConfig, array $xtWriteConfig, ?callable $performanceLogger = null)
     {
         $connection = $sourcesConfig['sources']['xt']['connection'] ?? [];
         $this->client = new WelaApiClient(
@@ -19,6 +21,7 @@ abstract class AbstractXtWriter implements XtQueueWriter
             max(1, (int) ($connection['request_timeout_seconds'] ?? 30))
         );
         $this->writeConfig = $xtWriteConfig['write'] ?? [];
+        $this->performanceLogger = $performanceLogger;
     }
 
     protected function requireConfiguredClient(string $message): void
@@ -121,6 +124,10 @@ abstract class AbstractXtWriter implements XtQueueWriter
         $map = $this->lookupMap($table, $lookupField, $field);
 
         if (!array_key_exists($lookupValue, $map)) {
+            $map = $this->refreshLookupMap($table, $lookupField, $field);
+        }
+
+        if (!array_key_exists($lookupValue, $map)) {
             throw new PermanentExportQueueException("XT-Referenz fuer '{$table}' mit {$lookupField} '{$lookupValue}' wurde nicht gefunden.");
         }
 
@@ -136,6 +143,13 @@ abstract class AbstractXtWriter implements XtQueueWriter
         }
 
         return $this->lookupCaches[$cacheKey];
+    }
+
+    private function refreshLookupMap(string $table, string $keyField, string $valueField): array
+    {
+        $cacheKey = strtolower($table . '|' . $keyField . '|' . $valueField);
+
+        return $this->lookupCaches[$cacheKey] = $this->client->lookupMap($table, $keyField, $valueField);
     }
 
     protected function storeLookupValue(string $table, string $keyField, string $valueField, string $key, mixed $value): void
@@ -215,6 +229,17 @@ abstract class AbstractXtWriter implements XtQueueWriter
         return $record;
     }
 
+    protected function decodeQueuePayload(array $entry): array
+    {
+        $payload = json_decode((string) ($entry['payload'] ?? ''), true);
+
+        if (!is_array($payload)) {
+            throw new PermanentExportQueueException('Queue-Payload enthaelt kein gueltiges JSON.');
+        }
+
+        return $payload;
+    }
+
     protected function reserveUniqueSeoUrl(string $urlText, string $languageCode, string $fallbackSlug): string
     {
         $urlText = trim($urlText, '/');
@@ -245,6 +270,15 @@ abstract class AbstractXtWriter implements XtQueueWriter
         $this->seoUrlIndex = $index;
 
         return $candidate;
+    }
+
+    protected function logPerformance(string $message, array $context = []): void
+    {
+        if (!is_callable($this->performanceLogger)) {
+            return;
+        }
+
+        ($this->performanceLogger)($message, $context);
     }
 
     private function seoUrlIndex(): array

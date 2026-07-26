@@ -17,7 +17,12 @@ final class SyncMonitor
             return null;
         }
 
-        $this->closeStaleRuns($runType);
+        $allowParallel = (bool) ($context['allow_parallel'] ?? false);
+        if (!$allowParallel) {
+            $this->closeStaleRuns($runType);
+        }
+
+        unset($context['allow_parallel']);
 
         $stmt = $this->stageDb->prepare(
             'INSERT INTO sync_runs (run_type, status, started_at, context_json)

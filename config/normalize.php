@@ -130,20 +130,5 @@ return [
             ],
         ],
 
-        'extra.attribute_translations' => [
-            'fields' => [
-                'row_id' => 'id',
-                'afs_artikel_id' => 'article_id',
-                'sku' => 'article_number',
-                'sort_order' => 'sort_order',
-                'source_directory' => 'source_directory',
-                'attribute_name' => 'attribute_name',
-                'attribute_value' => 'attribute_value',
-                'language_code' => 'language',
-            ],
-            'calculated' => [
-                'language_code_normalized' => 'calc:normalize_language_code',
-            ],
-        ],
     ],
 ];

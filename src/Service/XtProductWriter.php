@@ -7,19 +7,23 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
     private array $languageConfig;
     private StageCategoryMap $categoryMap;
     private array $productsBySku = [];
+    private array $primaryImagesByArticleId = [];
     private int $productBatchRequestSize;
+    private int $productBatchRequestMaxPayloadBytes;
     private array $seoUrlCache = [];
 
-    public function __construct(array $sourcesConfig, array $xtWriteConfig)
+    public function __construct(array $sourcesConfig, array $xtWriteConfig, ?callable $performanceLogger = null)
     {
-        parent::__construct($sourcesConfig, $xtWriteConfig);
+        parent::__construct($sourcesConfig, $xtWriteConfig, $performanceLogger);
 
         $languageConfig = require dirname(__DIR__, 2) . '/config/languages.php';
         $this->languageConfig = is_array($languageConfig) ? $languageConfig : [];
         $this->categoryMap = new StageCategoryMap($sourcesConfig);
         $this->productsBySku = $this->loadProductsBySku($sourcesConfig);
+        $this->primaryImagesByArticleId = $this->loadPrimaryImagesByArticleId($sourcesConfig);
         $xtConnection = $sourcesConfig['sources']['xt']['connection'] ?? [];
         $this->productBatchRequestSize = max(1, (int) ($xtConnection['product_batch_request_size'] ?? 1000));
+        $this->productBatchRequestMaxPayloadBytes = max(0, (int) ($xtConnection['product_batch_request_max_payload_bytes'] ?? 0));
     }
 
     public function supports(string $entityType): bool
@@ -72,6 +76,9 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
         $done = [];
         $failed = [];
         $batchItems = [];
+        $prepareStartedAt = microtime(true);
+        $preparedCount = 0;
+        $offlineCount = 0;
 
         foreach ($entries as $entry) {
             $queueId = (int) ($entry['id'] ?? 0);
@@ -82,6 +89,7 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
                 if ($this->isOfflinePayload($payload)) {
                     $this->write($entityType, $entry, $payload);
                     $done[$queueId] = true;
+                    $offlineCount++;
 
                     continue;
                 }
@@ -93,50 +101,169 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
                     'single_sync_payload' => $prepared['single_sync_payload'],
                     'batch_sync_payload' => $prepared['batch_sync_payload'],
                 ];
+                $preparedCount++;
             } catch (Throwable $exception) {
                 $failed[$queueId] = $exception;
             }
         }
 
+        $prepareDurationSeconds = microtime(true) - $prepareStartedAt;
+        $initialFailureCount = count($failed);
+
+        $this->logPerformance('Produkt-Batch vorbereitet.', [
+            'entity_type' => $entityType,
+            'entry_count' => count($entries),
+            'prepared_count' => $preparedCount,
+            'offline_count' => $offlineCount,
+            'preparation_failures' => $initialFailureCount,
+            'prepare_duration_seconds' => round($prepareDurationSeconds, 4),
+            'product_batch_request_size' => $this->productBatchRequestSize,
+        ]);
+
         if ($batchItems === []) {
             return ['done' => $done, 'failed' => $failed];
         }
 
-        foreach (array_chunk($batchItems, $this->productBatchRequestSize) as $chunk) {
-            $response = $this->client->syncProductsBatch($chunk);
-            $results = is_array($response['results'] ?? null) ? $response['results'] : [];
+        foreach ($this->buildProductBatchChunks($batchItems) as $chunkIndex => $chunk) {
+            $chunkNumber = $chunkIndex + 1;
+            $chunkQueueIds = array_values(array_map(
+                static fn (array $item): int => (int) ($item['queue_id'] ?? 0),
+                $chunk
+            ));
+            $chunkEntityIds = array_values(array_filter(array_map(
+                static fn (array $item): string => trim((string) ($item['entity_id'] ?? '')),
+                $chunk
+            ), static fn (string $entityId): bool => $entityId !== ''));
 
-            foreach ($results as $result) {
-                if (!is_array($result)) {
-                    continue;
-                }
+            $this->logPerformance('Produkt-Batch Request gestartet.', [
+                'entity_type' => $entityType,
+                'chunk_number' => $chunkNumber,
+                'chunk_size' => count($chunk),
+                'estimated_payload_bytes' => $this->estimateBatchPayloadBytes($chunk),
+                'queue_id_first' => $chunkQueueIds[0] ?? null,
+                'queue_id_last' => $chunkQueueIds !== [] ? $chunkQueueIds[count($chunkQueueIds) - 1] : null,
+                'entity_id_first' => $chunkEntityIds[0] ?? null,
+                'entity_id_last' => $chunkEntityIds !== [] ? $chunkEntityIds[count($chunkEntityIds) - 1] : null,
+            ]);
 
-                $queueId = (int) ($result['queue_id'] ?? 0);
-                if ($queueId <= 0) {
-                    continue;
-                }
+            $chunkOutcome = $this->sendProductBatchChunk($entityType, $chunk, $chunkNumber);
 
-                if (($result['ok'] ?? false) === true) {
-                    $done[$queueId] = true;
-                    unset($failed[$queueId]);
-
-                    continue;
-                }
-
-                $failed[$queueId] = new RuntimeException((string) ($result['error'] ?? 'Produkt-Batch-Export fehlgeschlagen.'));
+            foreach ($chunkOutcome['done'] as $queueId => $value) {
+                $done[(int) $queueId] = true;
+                unset($failed[(int) $queueId]);
             }
 
-            foreach ($chunk as $item) {
-                $queueId = (int) ($item['queue_id'] ?? 0);
-                if ($queueId <= 0 || isset($done[$queueId]) || isset($failed[$queueId])) {
-                    continue;
-                }
-
-                $failed[$queueId] = new RuntimeException('Produkt-Batch-Export lieferte kein Ergebnis fuer Queue-Eintrag.');
+            foreach ($chunkOutcome['failed'] as $queueId => $exception) {
+                $failed[(int) $queueId] = $exception;
             }
         }
 
         return ['done' => $done, 'failed' => $failed];
+    }
+
+    private function buildProductBatchChunks(array $batchItems): array
+    {
+        if ($batchItems === []) {
+            return [];
+        }
+
+        $chunks = [];
+        $currentChunk = [];
+        $currentSize = 0;
+
+        foreach ($batchItems as $item) {
+            $itemSize = $this->estimateBatchPayloadBytes([$item]);
+            $wouldExceedCount = $currentChunk !== [] && count($currentChunk) >= $this->productBatchRequestSize;
+            $wouldExceedPayload = $this->productBatchRequestMaxPayloadBytes > 0
+                && $currentChunk !== []
+                && ($currentSize + $itemSize) > $this->productBatchRequestMaxPayloadBytes;
+
+            if ($wouldExceedCount || $wouldExceedPayload) {
+                $chunks[] = $currentChunk;
+                $currentChunk = [];
+                $currentSize = 0;
+            }
+
+            $currentChunk[] = $item;
+            $currentSize += $itemSize;
+        }
+
+        if ($currentChunk !== []) {
+            $chunks[] = $currentChunk;
+        }
+
+        return $chunks;
+    }
+
+    private function sendProductBatchChunk(string $entityType, array $chunk, int $chunkNumber): array
+    {
+        $responseWithMeta = $this->client->syncProductsBatchWithMeta($chunk);
+        $response = is_array($responseWithMeta['data'] ?? null) ? $responseWithMeta['data'] : [];
+        $meta = is_array($responseWithMeta['meta'] ?? null) ? $responseWithMeta['meta'] : [];
+        $results = is_array($response['results'] ?? null) ? $response['results'] : [];
+        $done = [];
+        $failed = [];
+        $chunkDoneCount = 0;
+        $chunkFailedCount = 0;
+
+        foreach ($results as $result) {
+            if (!is_array($result)) {
+                continue;
+            }
+
+            $queueId = (int) ($result['queue_id'] ?? 0);
+            if ($queueId <= 0) {
+                continue;
+            }
+
+            if (($result['ok'] ?? false) === true) {
+                $done[$queueId] = true;
+                $chunkDoneCount++;
+
+                continue;
+            }
+
+            $failed[$queueId] = new RuntimeException((string) ($result['error'] ?? 'Produkt-Batch-Export fehlgeschlagen.'));
+            $chunkFailedCount++;
+        }
+
+        foreach ($chunk as $item) {
+            $queueId = (int) ($item['queue_id'] ?? 0);
+            if ($queueId <= 0 || isset($done[$queueId]) || isset($failed[$queueId])) {
+                continue;
+            }
+
+            $failed[$queueId] = new RuntimeException('Produkt-Batch-Export lieferte kein Ergebnis fuer Queue-Eintrag.');
+            $chunkFailedCount++;
+        }
+
+        $this->logPerformance('Produkt-Batch Request abgeschlossen.', [
+            'entity_type' => $entityType,
+            'chunk_number' => $chunkNumber,
+            'chunk_size' => count($chunk),
+            'result_count' => count($results),
+            'chunk_done_count' => $chunkDoneCount,
+            'chunk_failed_count' => $chunkFailedCount,
+            'http_duration_seconds' => round((float) ($meta['duration_seconds'] ?? 0.0), 4),
+            'http_status_code' => (int) ($meta['status_code'] ?? 0),
+            'payload_bytes' => (int) ($meta['payload_bytes'] ?? 0),
+            'response_bytes' => (int) ($meta['response_bytes'] ?? 0),
+        ]);
+
+        return [
+            'done' => $done,
+            'failed' => $failed,
+        ];
+    }
+
+    private function estimateBatchPayloadBytes(array $items): int
+    {
+        $encoded = json_encode([
+            'items' => array_values($items),
+            'include_results_data' => false,
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return is_string($encoded) ? strlen($encoded) : 0;
     }
 
     private function normalizeProductColumns(array $columns): array
@@ -296,6 +423,10 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
             $isInsert
         );
         $productColumns = $this->normalizeProductColumns($productColumns);
+        $primaryImage = trim((string) ($this->primaryImagesByArticleId[(string) ($product['afs_artikel_id'] ?? '')] ?? ''));
+        if ($primaryImage !== '') {
+            $productColumns['products_image'] = $primaryImage;
+        }
         $attributeEntities = $this->buildAttributeEntities($attributes);
         $attributeDescriptions = $this->buildAttributeDescriptions($attributes);
         $attributeRelations = $this->buildAttributeRelations($attributes);
@@ -333,7 +464,7 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
         ];
     }
 
-    private function decodeQueuePayload(array $entry): array
+    protected function decodeQueuePayload(array $entry): array
     {
         $payload = json_decode((string) ($entry['payload'] ?? ''), true);
 
@@ -545,6 +676,7 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
                 ];
                 $normalized[$sortOrder]['child_translations'][$translationLanguage] = [
                     'attribute_model' => $childModel,
+                    'parent_attribute_model' => $parentModel,
                     'language_code' => $translationLanguage,
                     'display_name' => $childDisplayName,
                 ];
@@ -611,19 +743,17 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
     {
         if ($this->isTruthy($product['is_slave'] ?? null)) {
             $masterSku = trim((string) ($product['master_sku'] ?? ''));
-            if ($masterSku === '') {
-                return null;
+            if ($masterSku !== '') {
+                $masterCategoryId = $this->resolvedCategoryIdForSku($masterSku, [$masterSku => true]);
+                if ($masterCategoryId !== null && $masterCategoryId !== '') {
+                    return $masterCategoryId;
+                }
             }
-
-            return $this->resolvedCategoryIdForSku($masterSku, [$masterSku => true]);
         }
 
         $categoryId = trim((string) ($product['category_afs_id'] ?? ''));
-        if ($categoryId !== '') {
-            return $categoryId;
-        }
 
-        return null;
+        return $categoryId !== '' ? $categoryId : null;
     }
 
     private function resolvedCategoryIdForSku(string $sku, array $visited): ?string
@@ -684,6 +814,7 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
                 'language_code' => $languageCode,
                 'auto_generate' => true,
                 'auto_generate_class' => 'product',
+                'auto_generate_text' => trim((string) ($translation['name'] ?? $product['name_default'] ?? '')),
                 'columns' => $columns,
             ];
         }
@@ -706,14 +837,17 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
                 }
 
                 $attributeModel = (string) ($attributeEntity['attribute_model'] ?? '');
-                if ($attributeModel === '' || isset($seen[$attributeModel])) {
+                $parentAttributeModel = trim((string) ($attributeEntity['parent_attribute_model'] ?? ''));
+                $attributeKey = $parentAttributeModel . '|' . $attributeModel;
+
+                if ($attributeModel === '' || isset($seen[$attributeKey])) {
                     continue;
                 }
 
-                $seen[$attributeModel] = true;
+                $seen[$attributeKey] = true;
                 $writes[] = [
                     'attribute_model' => $attributeModel,
-                    'parent_attribute_model' => $attributeEntity['parent_attribute_model'] ?? null,
+                    'parent_attribute_model' => $parentAttributeModel !== '' ? $parentAttributeModel : null,
                     'columns' => $this->resolveColumns(
                         (array) ($definition['columns'] ?? []),
                         ['attribute' => $attributeEntity],
@@ -739,7 +873,8 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
             foreach (['parent_translations', 'child_translations'] as $translationKey) {
                 foreach (($attributeGroup[$translationKey] ?? []) as $languageCode => $attribute) {
                     $attributeModel = (string) ($attribute['attribute_model'] ?? '');
-                    $seenKey = $attributeModel . '|' . $languageCode;
+                    $parentAttributeModel = trim((string) ($attribute['parent_attribute_model'] ?? ''));
+                    $seenKey = $parentAttributeModel . '|' . $attributeModel . '|' . $languageCode;
 
                     if ($attributeModel === '' || isset($seen[$seenKey])) {
                         continue;
@@ -748,6 +883,7 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
                     $seen[$seenKey] = true;
                     $writes[] = [
                         'attribute_model' => $attributeModel,
+                        'parent_attribute_model' => $attribute['parent_attribute_model'] ?? null,
                         'language_code' => $languageCode,
                         'columns' => $this->resolveColumns(
                             (array) ($definition['columns'] ?? []),
@@ -795,17 +931,12 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
 
     private function attributeParentModel(string $label): string
     {
-        return 'afs-attr-parent-' . $this->slugify($label) . '-' . substr(sha1($label), 0, 8);
+        return trim($label);
     }
 
     private function attributeValueModel(string $parentLabel, string $value): string
     {
-        return 'afs-attr-value-'
-            . $this->slugify($parentLabel)
-            . '-'
-            . $this->slugify($value)
-            . '-'
-            . substr(sha1($parentLabel . '|' . $value), 0, 8);
+        return trim($value);
     }
 
     private function isOfflinePayload(array $payload): bool
@@ -852,6 +983,23 @@ final class XtProductWriter extends AbstractXtWriter implements XtBatchQueueWrit
         }
 
         return $products;
+    }
+
+    private function loadPrimaryImagesByArticleId(array $sourcesConfig): array
+    {
+        $stageConfig = $sourcesConfig['sources']['stage'] ?? null;
+        if (!is_array($stageConfig)) {
+            return [];
+        }
+
+        $stageDb = ConnectionFactory::create($stageConfig);
+        $stmt = $stageDb->query("SELECT afs_artikel_id, file_name FROM stage_product_media WHERE type = 'images' AND position = 1 AND file_name IS NOT NULL AND file_name <> ''");
+        $images = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $images[(string) ($row['afs_artikel_id'] ?? '')] = trim((string) ($row['file_name'] ?? ''));
+        }
+
+        return $images;
     }
 
     private function isTruthy(mixed $value): bool

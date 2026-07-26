@@ -11,6 +11,7 @@ final class ImportWorkflow
     private AfsImporter $afsImporter;
     private ExtraImporter $extraImporter;
     private AttributeTranslationDictionaryService $attributeTranslationDictionary;
+    private AttributeTranslationProjectionService $attributeTranslationProjection;
 
     public function __construct(
         private array $configSources,
@@ -25,6 +26,7 @@ final class ImportWorkflow
         $this->stageWriter = new StageWriter($this->stageDb);
         $this->monitor = new SyncMonitor($this->stageDb);
         $this->attributeTranslationDictionary = new AttributeTranslationDictionaryService($this->stageDb, $this->extraDb);
+        $this->attributeTranslationProjection = new AttributeTranslationProjectionService($this->stageDb, $this->extraDb, $this->stageWriter);
         $this->afsImporter = new AfsImporter(
             $afsDb,
             $this->stageWriter,
@@ -155,8 +157,8 @@ final class ImportWorkflow
             'inserted_rows' => $fallbackCount,
         ]);
 
-        $this->extraImporter->importAttributeTranslations();
-        $this->monitor->log($runId, 'info', 'Zentrale Attribut-Uebersetzungen importiert.');
+        $attributeProjectionStats = $this->attributeTranslationProjection->rebuild();
+        $this->monitor->log($runId, 'info', 'Attribut-Dictionary in artikelbezogene RAW-Attribute projiziert.', $attributeProjectionStats);
     }
 
     private function importCategoryData(?int $runId): void

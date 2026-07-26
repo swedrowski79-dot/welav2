@@ -1,0 +1,138 @@
+Task
+- Neue Admin-Ansicht `Translations` im Seitenmenue ergaenzen, um Uebersetzungsabdeckung fuer Produkte, Kategorien und Attribute sichtbar zu machen.
+
+Files read
+- AGENTS.md
+- .github/copilot-instructions.md
+- PROJECT_CONTEXT.md
+- README.md
+- public/index.php
+- src/Web/View/layouts/app.php
+- src/Web/Core/Controller.php
+- src/Web/Repository/StageConsistencyRepository.php
+- src/Web/Repository/DashboardRepository.php
+- src/Web/View/dashboard/index.php
+
+Changed files
+- public/index.php
+- src/Web/Controller/DashboardController.php
+- src/Web/Controller/TranslationController.php
+- src/Web/Repository/DashboardRepository.php
+- src/Web/Repository/TranslationOverviewRepository.php
+- src/Web/Repository/AttributeDictionaryRepository.php
+- src/Web/View/translations/index.php
+- src/Web/View/layouts/app.php
+- src/Service/AttributeTranslationDictionaryService.php
+- src/Service/AfsExtrasBootstrapService.php
+- docs/agent-results/2026-07-17-translations-admin-overview.md
+
+Summary
+- Es wurde eine neue Admin-Seite unter `/translations` eingebaut.
+- Im Seitenmenue gibt es jetzt den Punkt `Translations`.
+- Die Seite zeigt oben Kennzahlen fuer:
+  - Artikel gesamt / Artikel uebersetzt
+  - Kategorien gesamt / Kategorien uebersetzt
+  - Attribute gesamt / Attribute uebersetzt
+- Die oberen Boxen wurden anschliessend auf Sprach-Splits erweitert:
+  - fuer Artikel `DE / EN / FR / NL`
+  - fuer Kategorien `DE / EN / FR / NL`
+  - fuer Attribute `DE / EN / FR / NL`
+- Pro Sprach-Container wird die jeweilige vorhandene Uebersetzungsmenge angezeigt.
+- Die Sprach-Container und Fehlmengen-Boxen sind klickbar und springen direkt in die passende Detailsicht.
+- Darunter gibt es jetzt eine echte filterbare Detailtabelle statt reiner Beispielbloecke.
+- Die Detailansicht unterstuetzt:
+  - Bereichsfilter (`Artikel`, `Kategorien`, `Attribute`)
+  - Statusfilter (`Mit Uebersetzung`, `Ohne Uebersetzung`)
+  - Sprachfilter (`DE`, `EN`, `FR`, `NL`)
+  - Pagination ueber den vorhandenen Standard-Paginator
+- Bei grossen Treffermengen zeigt die Tabelle jetzt zusaetzlich einen Hinweis, dass nur der aktuelle Seitenausschnitt geladen wird.
+- Unten in der Tabelle wird jetzt auch der konkrete Bereich angezeigt, also zum Beispiel `Anzeige 1 bis 20`.
+- Beim Klick auf eine Sprachbox wie `DE` zeigt die Detailtabelle jetzt weiterhin die vollstaendige Sprachliste pro Artikel bzw. Kategorie an.
+- Der Sprachfilter schraenkt damit nur die Auswahl der Datensaetze ein, nicht mehr die aggregierte Anzeige in der Spalte `Sprachen`.
+- Die Attribut-Tabelle zeigt jetzt ebenfalls eine Spalte `Sprachen`.
+- Der aktuelle Datenstand enthaelt in `stage_attribute_translations` allerdings nur `de`; deshalb erscheint dort momentan auch nur `de`.
+- Die Sprachzaehlung in den Artikel- und Kategorie-Boxen zaehlt jetzt nur noch Uebersetzungen mit passendem Basisdatensatz in `stage_products` bzw. `stage_categories`.
+- Die obere Attribut-Kachel zaehlt jetzt ebenfalls artikelbezogen statt zeilenbezogen.
+- Dadurch zeigt die Attribut-Kachel oben keine Summe aller Attribut-Zeilen mehr, sondern die Anzahl verknuepfter Artikel mit Attribut-Uebersetzungen.
+- Fuer die Detailtabelle gibt es jetzt zusaetzlich den Statusfilter `Verwaiste Uebersetzungen`.
+- Damit lassen sich insbesondere Produkt-Uebersetzungen anzeigen, die in `stage_product_translations` vorhanden sind, aber kein passendes Produkt in `stage_products` mehr haben.
+- Die normale Attribut-Detailansicht (`Mit Uebersetzung` und `Ohne Uebersetzung`) zeigt jetzt nur noch Attribute von existierenden Artikeln.
+- Verwaiste Attribut-Zeilen ohne passendes `stage_products` erscheinen nur noch im Filter `Verwaiste Uebersetzungen`.
+- Die zentrale Extra-Tabelle `attribute_translations` wurde um `is_active` erweitert.
+- Der Dictionary-Sync setzt aktuell gefundene Attribut-Begriffe auf `is_active = 1` und kann nicht mehr gefundene Eintraege auf `is_active = 0` setzen.
+- Das Feld wird sowohl bei Neuaufbau der Extra-Tabellen als auch per nachtraeglichem Schema-Check angelegt.
+- Ein anschliessender SQL-Fehler auf `/translations` wurde behoben.
+- Ursache war ein ungueltiger Alias in zwei Count-Subqueries der `TranslationOverviewRepository`, der MySQL mit `near 'rows'` abgebrochen hat.
+- Die betroffenen Subquery-Aliase wurden auf einen sauberen Namen angepasst, sodass die Detailzaehlung wieder laeuft und die Seite wieder rendert.
+- Die Attribut-Sektion auf `/translations` basiert jetzt direkt auf dem flachen Dictionary in `afs_extras.attribute_translations`.
+- Der fruehere zusaetzliche Block `Attribut-Dictionary` unterhalb der Seite wurde entfernt.
+- Die obere Attribut-Kachel zeigt jetzt:
+  - aktive Begriffe gesamt
+  - vollstaendig uebersetzte Begriffe
+  - Begriffe mit fehlender Uebersetzung
+  - Sprachabdeckung fuer `DE / EN / FR / NL`
+- Die normale Detailtabelle wechselt bei `Bereich = Attribute` jetzt auf Dictionary-Daten statt auf die alte artikelbezogene Stage-Sicht.
+- Dort sind weiterhin Filter, Pagination und Inline-Bearbeitung vorhanden.
+- Fuer Attribute bedeutet:
+  - `Vollstaendig uebersetzt` = aktiver Begriff mit `en`, `fr` und `nl`
+  - `Mit fehlender Uebersetzung` = aktiver Begriff mit mindestens einer fehlenden Zielsprache
+  - `Inaktive Begriffe` = `is_active = 0`
+- Die Bearbeitung bleibt direkt in `/translations` moeglich fuer:
+  - `en`
+  - `fr`
+  - `nl`
+  - `source_directory`
+  - `is_active`
+- Die Detailtabelle auf `/translations` hat jetzt zusaetzlich eine Mehrfachauswahl:
+  - Checkbox pro sichtbarer Zeile
+  - `Alle sichtbaren markieren`
+  - Button `Markierte loeschen`
+- Die Loeschfunktion arbeitet immer nur auf der aktuell sichtbaren Filteransicht der aktuellen Seite.
+- Fuer `Artikel` und `Kategorien` werden dabei die zugrunde liegenden Uebersetzungszeilen geloescht.
+- Fuer `Attribute` werden die ausgewaehlten Dictionary-Eintraege geloescht.
+- In der Sicht `Ohne Uebersetzung` bleibt die Auswahl deaktiviert, weil dort keine vorhandenen Uebersetzungsdatensaetze zum Loeschen existieren.
+- Nach dem Loeschlauf zeigt `/translations` eine Rueckmeldung mit Anzahl der geloeschten Zeilen.
+- Die Dashboard-Kachel `Produkt-Uebersetzungen` auf `/` zaehlt jetzt nur noch vollstaendig uebersetzte Produkte mit `DE`, `EN`, `FR` und `NL`.
+- Die Dashboard-Kachel `Attribut-Uebersetzungen` auf `/` zaehlt jetzt vollstaendig uebersetzte aktive Dictionary-Begriffe aus `afs_extras.attribute_translations` statt der alten Stage-Zeilenmenge.
+- Beim aktuellen Datenstand ergeben sich damit:
+  - `5441` vollstaendig uebersetzte Produkte
+  - `493` vollstaendig uebersetzte aktive Attribut-Begriffe
+
+Open points
+- Die Attribut-Sicht ist jetzt begriffsbasiert und nicht mehr artikelbezogen.
+- Falls du spaeter zusaetzlich eine Drilldown-Sicht brauchst, welche Artikel einen bestimmten Dictionary-Begriff verwenden, sollte das als eigene Detailansicht ergaenzt werden.
+
+Validation steps
+- `docker compose exec php php -l public/index.php`
+- `docker compose exec php php -l src/Web/Controller/TranslationController.php`
+- `docker compose exec php php -l src/Web/Controller/DashboardController.php`
+- `docker compose exec php php -l src/Web/Repository/DashboardRepository.php`
+- `docker compose exec php php -l src/Web/Repository/TranslationOverviewRepository.php`
+- `docker compose exec php php -l src/Web/Repository/AttributeDictionaryRepository.php`
+- `docker compose exec php php -l src/Web/View/translations/index.php`
+- `curl -s http://localhost:8080/ | rg -n "Produkt-Uebersetzungen|Attribut-Uebersetzungen"`
+- `docker compose exec -T mysql mysql -uroot -proot stage_sync -Nse "SELECT COUNT(*) FROM ( SELECT p.afs_artikel_id FROM stage_products p INNER JOIN stage_product_translations t ON t.afs_artikel_id = p.afs_artikel_id WHERE t.language_code IN ('de','en','fr','nl') GROUP BY p.afs_artikel_id HAVING COUNT(DISTINCT t.language_code)=4 ) x;"`
+- `docker compose exec -T mysql mysql -ustage -pstage afs_extras -Nse "SELECT COUNT(*) FROM attribute_translations WHERE is_active = 1 AND NULLIF(TRIM(en),'') IS NOT NULL AND NULLIF(TRIM(fr),'') IS NOT NULL AND NULLIF(TRIM(nl),'') IS NOT NULL;"`
+- `curl -i http://localhost:8080/translations`
+- `curl -s http://localhost:8080/translations | rg -n "Gesamttabelle|Anzeige [0-9]+ bis [0-9]+|Bitte Filter oder Pagination benutzen"`
+- `curl -s 'http://localhost:8080/translations?entity_type=product&coverage=translated&language_code=de'`
+- `curl -s 'http://localhost:8080/translations?entity_type=category&coverage=translated&language_code=de'`
+- `curl -s 'http://localhost:8080/translations?entity_type=attribute&coverage=translated&language_code=de'`
+- `curl -s 'http://localhost:8080/translations?entity_type=attribute&coverage=translated'`
+- `curl -s 'http://localhost:8080/translations?entity_type=attribute&coverage=missing'`
+- `curl -s 'http://localhost:8080/translations?entity_type=attribute&coverage=orphan'`
+- `curl -s -X POST http://localhost:8080/attribute-dictionary/update -d 'id=12&field=en&value=80 mm'`
+- `curl -i -s -X POST http://localhost:8080/translations/delete -d 'entity_type=attribute&coverage=orphan&language_code='`
+- `curl -i -s -X POST http://localhost:8080/translations/delete -d 'entity_type=attribute&coverage=orphan&language_code=&selected_ids[]=99999999'`
+- `docker compose exec -T mysql mysql -uroot -proot stage_sync -e "SELECT language_code, COUNT(*) AS cnt FROM stage_attribute_translations GROUP BY language_code ORDER BY language_code;"`
+- `curl -s 'http://localhost:8080/translations?entity_type=product&coverage=orphan'`
+- `curl -s http://localhost:8080/translations`
+- `docker compose exec -T mysql mysql -uroot -proot stage_sync -e "SELECT COUNT(DISTINCT a.afs_artikel_id) ... FROM stage_attribute_translations ..."`
+- `curl -s 'http://localhost:8080/translations?entity_type=attribute&coverage=translated'`
+- `curl -s 'http://localhost:8080/translations?entity_type=attribute&coverage=orphan'`
+- `docker compose exec php php -l src/Service/AttributeTranslationDictionaryService.php`
+- `docker compose exec php php -l src/Service/AfsExtrasBootstrapService.php`
+- `docker compose exec -T mysql mysql -ustage -pstage afs_extras -e "SHOW COLUMNS FROM attribute_translations LIKE 'is_active'; SELECT is_active, COUNT(*) AS cnt FROM attribute_translations GROUP BY is_active ORDER BY is_active;"`
+
+Recommended next step
+- Die neue Seite im Browser unter `/translations` mit mehreren Filterkombinationen pruefen, insbesondere `Ohne Uebersetzung` fuer Artikel und Kategorien.

@@ -13,6 +13,7 @@ return [
         'stage_product_translations' => 'Stage Produkt-Uebersetzungen',
         'stage_product_documents' => 'Stage Produkt-Dokumente',
         'stage_product_media' => 'Stage Produkt-Medien',
+        'images_file' => 'Bild-Dateien',
         'documents_file' => 'Dokument-Dateien',
         'stage_categories' => 'Stage Kategorien',
         'stage_category_translations' => 'Stage Kategorie-Uebersetzungen',

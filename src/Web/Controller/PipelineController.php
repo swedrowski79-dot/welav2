@@ -48,10 +48,11 @@ final class PipelineController extends Controller
         $deltaConfig = \web_config('delta');
         $defaultExportWorkerBatchSize = (int) (($deltaConfig['product_export_queue']['worker_batch_size'] ?? 1000));
         $exportWorkerBatchSize = (string) ($envValues['EXPORT_WORKER_BATCH_SIZE'] ?? (string) $defaultExportWorkerBatchSize);
+        $exportWorkerCount = (string) max(1, (int) ($envValues['EXPORT_WORKER_COUNT'] ?? 1));
 
         return $this->render('pipeline/index', [
-            'pageTitle' => 'Pipeline & Export Queue',
-            'pageSubtitle' => 'Pipeline starten, Export Queue ueberwachen und Reset-Aktionen kontrolliert ausfuehren.',
+            'pageTitle' => 'Pipeline-Steuerung',
+            'pageSubtitle' => 'Standardablauf starten oder einzelne Schritte gezielt ausfuehren. Queue-Verwaltung ist separat erreichbar.',
             'filters' => $filters,
             'paginator' => $paginator,
             'queueEntries' => $repository->paginatedQueueEntries($filters, $paginator),
@@ -77,6 +78,7 @@ final class PipelineController extends Controller
             'latestWorkerVisibility' => $this->workerVisibility($latestWorkerRun),
             'recentExportWorkerIssues' => $monitoringRepository->recentExportWorkerIssues(10),
             'exportWorkerBatchSize' => $exportWorkerBatchSize,
+            'exportWorkerCount' => $exportWorkerCount,
             'started' => $request->query('started') === '1',
             'migrationsDone' => $request->int('migrations_done'),
             'resetDone' => $request->string('reset_done'),
@@ -109,23 +111,72 @@ final class PipelineController extends Controller
         ]);
     }
 
+    public function queue(Request $request): string
+    {
+        $stageDb = StageConnection::make();
+        $repository = new PipelineAdminRepository($stageDb, \web_config('admin'), \web_config('delta'));
+        $monitoringRepository = new MonitoringRepository($stageDb);
+        $filters = [
+            'entity_type' => $request->string('entity_type'),
+            'status' => $request->string('status'),
+            'action' => $request->string('action'),
+        ];
+        $page = max(1, $request->int('page', 1));
+        $paginator = new Paginator($page, $this->perPage($request), $repository->countQueueEntries($filters));
+
+        return $this->render('pipeline/queue', [
+            'pageTitle' => 'Export Queue',
+            'pageSubtitle' => 'Queue-Eintraege, Retries und Exportprobleme getrennt von der Pipeline-Steuerung verwalten.',
+            'filters' => $filters,
+            'paginator' => $paginator,
+            'queueEntries' => $repository->paginatedQueueEntries($filters, $paginator),
+            'queueSummary' => $repository->queueSummary(),
+            'queueSummaryByEntity' => $repository->queueSummaryByEntity(),
+            'queueIssueSummary' => $repository->queueIssueSummary(),
+            'recentQueueIssues' => $repository->recentQueueIssues(10),
+            'entityTypes' => $repository->entityTypes(),
+            'latestDeltaVisibility' => $this->deltaVisibility($monitoringRepository->latestRunByTypes(['delta', 'expand'])),
+            'latestWorkerVisibility' => $this->workerVisibility($monitoringRepository->latestRunByTypes(['export_queue_worker'])),
+            'retryDone' => $request->string('retry_done'),
+            'retryCount' => $request->int('retry_count'),
+            'errorMessage' => $request->string('error'),
+            'currentPath' => $request->path(),
+        ]);
+    }
+
     public function start(Request $request): void
     {
         $job = $request->postString('job');
         $batchSizeRaw = $request->postString('batch_size');
         $batchSize = max(0, (int) $batchSizeRaw);
+        $workerCountRaw = $request->postString('worker_count');
+        $workerCount = max(0, (int) $workerCountRaw);
 
         try {
             $options = [];
 
-            if (in_array($job, ['export_queue_worker', 'full_pipeline'], true) && $batchSizeRaw !== '') {
-                if ($batchSize < 1) {
-                    throw new \InvalidArgumentException('Batchgroesse muss groesser als 0 sein.');
+            if (in_array($job, ['export_queue_worker', 'full_pipeline'], true)) {
+                $envUpdates = [];
+
+                if ($batchSizeRaw !== '') {
+                    if ($batchSize < 1) {
+                        throw new \InvalidArgumentException('Batchgroesse muss groesser als 0 sein.');
+                    }
+
+                    $envUpdates['EXPORT_WORKER_BATCH_SIZE'] = (string) $batchSize;
                 }
 
-                (new EnvFileRepository())->save([
-                    'EXPORT_WORKER_BATCH_SIZE' => (string) $batchSize,
-                ]);
+                if ($workerCountRaw !== '') {
+                    if ($workerCount < 1) {
+                        throw new \InvalidArgumentException('Worker-Anzahl muss groesser als 0 sein.');
+                    }
+
+                    $envUpdates['EXPORT_WORKER_COUNT'] = (string) $workerCount;
+                }
+
+                if ($envUpdates !== []) {
+                    (new EnvFileRepository())->save($envUpdates);
+                }
             }
 
             if ($job === 'export_queue_worker' && $batchSize > 0) {
@@ -197,13 +248,13 @@ final class PipelineController extends Controller
                 default => throw new \InvalidArgumentException('Unbekannte Retry-Aktion: ' . $scope),
             };
 
-            Response::redirect(Html::buildUrl('/pipeline', array_filter([
+            Response::redirect(Html::buildUrl('/pipeline/queue', array_filter([
                 ...$redirectParams,
                 'retry_done' => $scope,
                 'retry_count' => $updated,
             ], static fn (mixed $value): bool => $value !== '')));
         } catch (\Throwable $exception) {
-            Response::redirect(Html::buildUrl('/pipeline', array_filter([
+            Response::redirect(Html::buildUrl('/pipeline/queue', array_filter([
                 ...$redirectParams,
                 'error' => $exception->getMessage(),
             ], static fn (mixed $value): bool => $value !== '')));

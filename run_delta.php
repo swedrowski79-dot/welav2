@@ -9,12 +9,13 @@ $configSources = require __DIR__ . '/config/sources.php';
 $configDelta = require __DIR__ . '/config/delta.php';
 
 $stageDb = ConnectionFactory::create($configSources['sources']['stage']);
+$extraDb = ConnectionFactory::create($configSources['sources']['extra']);
 
 $monitor = new SyncMonitor($stageDb);
 $runId = $monitor->start('delta', [
     'script' => 'run_delta.php',
 ]);
-$deltaService = new DeltaRunnerService($stageDb, $configDelta, $monitor, $runId);
+$deltaService = new DeltaRunnerService($stageDb, $extraDb, $configDelta, $monitor, $runId);
 
 try {
     $monitor->log($runId, 'info', 'Delta gestartet.');

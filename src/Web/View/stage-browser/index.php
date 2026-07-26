@@ -35,7 +35,7 @@ if ($search !== '') {
     </form>
 </div>
 
-<div class="panel-card p-0" data-stage-browser>
+<div class="panel-card p-0" data-stage-browser data-update-endpoint="/stage-browser/update">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 p-4 border-bottom">
         <div class="table-toolbar">
             <div class="text-secondary small">

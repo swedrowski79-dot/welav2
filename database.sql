@@ -1,3 +1,9 @@
+CREATE DATABASE IF NOT EXISTS stage_sync
+CHARACTER SET utf8mb4
+COLLATE utf8mb4_unicode_ci;
+
+USE stage_sync;
+
 CREATE TABLE IF NOT EXISTS raw_afs_articles (
     id INT AUTO_INCREMENT PRIMARY KEY,
     afs_artikel_id INT NULL,

@@ -83,10 +83,8 @@ return [
             'product.is_master' => 'is_master',
             'product.master_sku' => 'master_sku',
             'product.category_afs_id' => 'category_afs_id',
+            'product.primary_image' => 'primary_image',
         ],
-        'mirror_translation_hash_field' => 'translation_hash',
-        'mirror_attribute_hash_field' => 'attribute_hash',
-        'mirror_seo_hash_field' => 'seo_hash',
         'mirror_require_success_run' => true,
         'hash_fields' => [
             'afs_artikel_id',
@@ -110,6 +108,7 @@ return [
             'is_standard',
             'master_sku',
             'online_flag',
+            'primary_image',
         ],
     ],
 

@@ -4,16 +4,24 @@ use App\Web\Core\Html;
 
 $adminConfig = web_config('admin');
 $appName = $adminConfig['app_name'];
-$navigation = [
-    '/' => 'Dashboard',
-    '/pipeline' => 'Pipeline',
-    '/document-files' => 'Dokument-Dateien',
-    '/image-files' => 'Bild-Dateien',
-    '/sync-runs' => 'Laeufe',
-    '/logs' => 'Logs',
-    '/errors' => 'Fehler',
-    '/stage-browser' => 'Stage',
-    '/status' => 'Status',
+$navigationGroups = [
+    'Betrieb' => [
+        '/' => ['Dashboard', 'speedometer2'],
+        '/pipeline' => ['Pipeline', 'play-circle'],
+        '/pipeline/queue' => ['Export Queue', 'list-check'],
+        '/sync-runs' => ['Laeufe', 'clock-history'],
+        '/errors' => ['Fehler', 'exclamation-triangle'],
+    ],
+    'Daten' => [
+        '/translations' => ['Uebersetzungen', 'translate'],
+        '/document-files' => ['Dokumente', 'file-earmark-text'],
+        '/image-files' => ['Bilder', 'image'],
+        '/stage-browser' => ['Stage-Daten', 'database'],
+    ],
+    'System' => [
+        '/status' => ['Status & Konfiguration', 'gear'],
+        '/logs' => ['Logs', 'journal-text'],
+    ],
 ];
 ?>
 <!DOCTYPE html>
@@ -56,6 +64,21 @@ $navigation = [
             border-radius: 14px;
             padding: 0.85rem 1rem;
             margin-bottom: 0.35rem;
+        }
+        .sidebar .nav-label {
+            color: rgba(255, 255, 255, 0.45);
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin: 1.25rem 0 0.55rem 0.75rem;
+        }
+        .sidebar .nav-label:first-child {
+            margin-top: 0;
+        }
+        .sidebar .nav-link i {
+            width: 1.25rem;
+            text-align: center;
         }
         .sidebar .nav-link.active,
         .sidebar .nav-link:hover {
@@ -121,6 +144,39 @@ $navigation = [
         }
         .details-card[open] summary::after {
             content: '−';
+        }
+        .pipeline-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .pipeline-flow-step {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.45rem 0.65rem;
+            background: #f8fafc;
+            border: 1px solid var(--border-soft);
+            border-radius: 999px;
+            color: var(--text-main);
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .pipeline-flow-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.3rem;
+            height: 1.3rem;
+            border-radius: 50%;
+            background: var(--brand);
+            color: #fff;
+            font-size: 0.7rem;
+            font-weight: 800;
+        }
+        .pipeline-section > summary {
+            padding: 0.85rem 1rem;
         }
         .inline-metric {
             display: inline-flex;
@@ -321,10 +377,14 @@ $navigation = [
                 </div>
             </div>
             <nav class="nav flex-column">
-                <?php foreach ($navigation as $path => $label): ?>
-                    <a class="nav-link <?= ($currentPath ?? '/') === $path ? 'active' : '' ?>" href="<?= Html::escape($path) ?>">
-                        <?= Html::escape($label) ?>
-                    </a>
+                <?php foreach ($navigationGroups as $groupLabel => $navigation): ?>
+                    <div class="nav-label"><?= Html::escape($groupLabel) ?></div>
+                    <?php foreach ($navigation as $path => [$label, $icon]): ?>
+                        <a class="nav-link d-flex align-items-center gap-2 <?= ($currentPath ?? '/') === $path ? 'active' : '' ?>" href="<?= Html::escape($path) ?>">
+                            <i class="bi bi-<?= Html::escape($icon) ?>"></i>
+                            <span><?= Html::escape($label) ?></span>
+                        </a>
+                    <?php endforeach; ?>
                 <?php endforeach; ?>
             </nav>
         </aside>
@@ -368,20 +428,9 @@ $navigation = [
 </div>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    var browser = document.querySelector('[data-stage-browser]');
-    if (!browser) {
+    var browsers = document.querySelectorAll('[data-stage-browser]');
+    if (browsers.length === 0) {
         return;
-    }
-
-    var statusNode = browser.querySelector('[data-stage-status]');
-
-    function setStatus(message, state) {
-        if (!statusNode) {
-            return;
-        }
-
-        statusNode.textContent = message || '';
-        statusNode.dataset.state = state || '';
     }
 
     function buildEditor(cell, value) {
@@ -397,18 +446,32 @@ document.addEventListener('DOMContentLoaded', function () {
         return editor;
     }
 
-    async function saveCell(cell, nextValue) {
+    async function saveCell(browser, cell, nextValue) {
         var params = new URLSearchParams();
         params.set('table', cell.dataset.table || '');
         params.set('id', cell.dataset.id || '');
         params.set('field', cell.dataset.field || '');
         params.set('value', nextValue);
+        var browserRoot = cell.closest('[data-update-endpoint]');
+        var updateEndpoint = browserRoot && browserRoot.dataset.updateEndpoint
+            ? browserRoot.dataset.updateEndpoint
+            : '/stage-browser/update';
+        var statusNode = browser.querySelector('[data-stage-status]');
+
+        function setStatus(message, state) {
+            if (!statusNode) {
+                return;
+            }
+
+            statusNode.textContent = message || '';
+            statusNode.dataset.state = state || '';
+        }
 
         cell.classList.add('saving');
         setStatus('Speichere ' + (cell.dataset.field || '') + ' ...', '');
 
         try {
-            var response = await fetch('/stage-browser/update', {
+            var response = await fetch(updateEndpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
@@ -446,86 +509,99 @@ document.addEventListener('DOMContentLoaded', function () {
         cell.classList.remove('editing');
     }
 
-    browser.querySelectorAll('[data-editable="true"]').forEach(function (cell) {
-        cell.addEventListener('dblclick', function () {
-            if (cell.classList.contains('editing') || cell.classList.contains('saving')) {
+    browsers.forEach(function (browser) {
+        var statusNode = browser.querySelector('[data-stage-status]');
+
+        function setStatus(message, state) {
+            if (!statusNode) {
                 return;
             }
 
-            var display = cell.querySelector('.cell-display');
-            if (!display) {
-                return;
-            }
+            statusNode.textContent = message || '';
+            statusNode.dataset.state = state || '';
+        }
 
-            var originalValue = cell.dataset.value || '';
-            var input = buildEditor(cell, originalValue);
-            display.hidden = true;
-            cell.classList.add('editing');
-            cell.appendChild(input);
-            input.focus();
-            input.select();
-
-            var finalize = async function (commit) {
-                if (!cell.classList.contains('editing')) {
+        browser.querySelectorAll('[data-editable="true"]').forEach(function (cell) {
+            cell.addEventListener('dblclick', function () {
+                if (cell.classList.contains('editing') || cell.classList.contains('saving')) {
                     return;
                 }
 
-                if (!commit) {
-                    cancelEdit(cell);
-                    setStatus('Bearbeitung abgebrochen.', '');
+                var display = cell.querySelector('.cell-display');
+                if (!display) {
                     return;
                 }
 
-                var nextValue = input.value;
-                if (nextValue === originalValue) {
-                    cancelEdit(cell);
-                    setStatus('Keine Aenderung gespeichert.', '');
-                    return;
-                }
+                var originalValue = cell.dataset.value || '';
+                var input = buildEditor(cell, originalValue);
+                display.hidden = true;
+                cell.classList.add('editing');
+                cell.appendChild(input);
+                input.focus();
+                input.select();
 
-                try {
-                    var result = await saveCell(cell, nextValue);
-                    var storedValue = result.value;
-                    var isNull = result.isNull === true;
-                    cell.dataset.value = isNull ? '' : storedValue;
-                    cell.dataset.isNull = isNull ? 'true' : 'false';
-                    display.textContent = isNull ? 'NULL' : storedValue;
-                    cell.classList.toggle('text-secondary', isNull);
-                    cell.classList.toggle('fst-italic', isNull);
-                    cancelEdit(cell);
-                    setStatus('Feld gespeichert.', 'success');
-                } catch (error) {
-                    cancelEdit(cell);
-                    var message = error && error.message ? error.message : 'Speichern fehlgeschlagen.';
-                    if (message === 'The string did not match the expected pattern.') {
-                        message = 'Die Eingabe konnte nicht gespeichert werden. Bitte den Feldwert pruefen und erneut versuchen.';
+                var finalize = async function (commit) {
+                    if (!cell.classList.contains('editing')) {
+                        return;
                     }
-                    setStatus(message, 'error');
-                }
-            };
 
-            input.addEventListener('keydown', function (event) {
-                if (event.key === 'Escape') {
-                    event.preventDefault();
-                    finalize(false);
-                    return;
-                }
+                    if (!commit) {
+                        cancelEdit(cell);
+                        setStatus('Bearbeitung abgebrochen.', '');
+                        return;
+                    }
 
-                if (event.key === 'Enter' && !event.shiftKey && input.tagName !== 'TEXTAREA') {
-                    event.preventDefault();
+                    var nextValue = input.value;
+                    if (nextValue === originalValue) {
+                        cancelEdit(cell);
+                        setStatus('Keine Aenderung gespeichert.', '');
+                        return;
+                    }
+
+                    try {
+                        var result = await saveCell(browser, cell, nextValue);
+                        var storedValue = result.value;
+                        var isNull = result.isNull === true;
+                        cell.dataset.value = isNull ? '' : storedValue;
+                        cell.dataset.isNull = isNull ? 'true' : 'false';
+                        display.textContent = isNull ? 'NULL' : storedValue;
+                        cell.classList.toggle('text-secondary', isNull);
+                        cell.classList.toggle('fst-italic', isNull);
+                        cancelEdit(cell);
+                        setStatus('Feld gespeichert.', 'success');
+                    } catch (error) {
+                        cancelEdit(cell);
+                        var message = error && error.message ? error.message : 'Speichern fehlgeschlagen.';
+                        if (message === 'The string did not match the expected pattern.') {
+                            message = 'Die Eingabe konnte nicht gespeichert werden. Bitte den Feldwert pruefen und erneut versuchen.';
+                        }
+                        setStatus(message, 'error');
+                    }
+                };
+
+                input.addEventListener('keydown', function (event) {
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        finalize(false);
+                        return;
+                    }
+
+                    if (event.key === 'Enter' && !event.shiftKey && input.tagName !== 'TEXTAREA') {
+                        event.preventDefault();
+                        finalize(true);
+                        return;
+                    }
+
+                    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                        event.preventDefault();
+                        finalize(true);
+                    }
+                });
+
+                input.addEventListener('blur', function () {
                     finalize(true);
-                    return;
-                }
-
-                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                    event.preventDefault();
-                    finalize(true);
-                }
+                }, { once: true });
             });
-
-            input.addEventListener('blur', function () {
-                finalize(true);
-            }, { once: true });
         });
     });
 });

@@ -7,8 +7,9 @@ namespace App\Web\Repository;
 final class DashboardRepository
 {
     private const MYSQL_TABLE_NOT_FOUND = 1146;
+    private const LANGUAGES = ['de', 'en', 'fr', 'nl'];
 
-    public function __construct(private \PDO $stageDb)
+    public function __construct(private \PDO $stageDb, private ?\PDO $extraDb = null)
     {
     }
 
@@ -17,8 +18,8 @@ final class DashboardRepository
         return [
             'products' => $this->countTable('stage_products'),
             'categories' => $this->countTable('stage_categories'),
-            'translations' => $this->countTable('stage_product_translations'),
-            'attribute_translations' => $this->countTable('stage_attribute_translations'),
+            'translations' => $this->countFullyTranslatedProducts(),
+            'attribute_translations' => $this->countFullyTranslatedAttributes(),
             'open_errors' => $this->countOpenErrors(),
         ];
     }
@@ -69,6 +70,57 @@ final class DashboardRepository
     {
         try {
             $stmt = $this->stageDb->query("SELECT COUNT(*) FROM sync_errors WHERE status = 'open'");
+
+            return (int) $stmt->fetchColumn();
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return 0;
+            }
+
+            throw $exception;
+        }
+    }
+
+    private function countFullyTranslatedProducts(): int
+    {
+        try {
+            $stmt = $this->stageDb->query(
+                'SELECT COUNT(*) FROM (
+                    SELECT p.`afs_artikel_id`
+                    FROM `stage_products` p
+                    INNER JOIN `stage_product_translations` t
+                        ON t.`afs_artikel_id` = p.`afs_artikel_id`
+                    WHERE t.`language_code` IN ("de", "en", "fr", "nl")
+                    GROUP BY p.`afs_artikel_id`
+                    HAVING COUNT(DISTINCT t.`language_code`) = ' . count(self::LANGUAGES) . '
+                ) translated_products'
+            );
+
+            return (int) $stmt->fetchColumn();
+        } catch (\PDOException $exception) {
+            if ($this->isMissingTable($exception)) {
+                return 0;
+            }
+
+            throw $exception;
+        }
+    }
+
+    private function countFullyTranslatedAttributes(): int
+    {
+        if ($this->extraDb === null) {
+            return 0;
+        }
+
+        try {
+            $stmt = $this->extraDb->query(
+                'SELECT COUNT(*)
+                 FROM `attribute_translations`
+                 WHERE `is_active` = 1
+                   AND COALESCE(NULLIF(TRIM(`en`), \'\'), NULL) IS NOT NULL
+                   AND COALESCE(NULLIF(TRIM(`fr`), \'\'), NULL) IS NOT NULL
+                   AND COALESCE(NULLIF(TRIM(`nl`), \'\'), NULL) IS NOT NULL'
+            );
 
             return (int) $stmt->fetchColumn();
         } catch (\PDOException $exception) {

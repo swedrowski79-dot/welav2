@@ -66,9 +66,7 @@ final class StatusController extends Controller
     public function browseApiDirectories(Request $request): string
     {
         try {
-            $envValues = (new EnvFileRepository())->load();
-            $configuredPath = trim((string) ($envValues['XT_DOCUMENTS_TARGET_PATH'] ?? ''));
-            $path = $request->string('path', $configuredPath);
+            $path = $request->string('path');
             $browser = $this->xtApiClient()->browseServerDirectories($path !== '' ? $path : null);
 
             return $this->render('status/browse-api', [
@@ -86,9 +84,7 @@ final class StatusController extends Controller
     public function browseApiTree(Request $request): void
     {
         try {
-            $envValues = (new EnvFileRepository())->load();
-            $configuredPath = trim((string) ($envValues['XT_DOCUMENTS_TARGET_PATH'] ?? ''));
-            $path = $request->string('path', $configuredPath);
+            $path = $request->string('path');
             $browser = $this->xtApiClient()->browseServerDirectories($path !== '' ? $path : null);
 
             Response::json([
@@ -129,9 +125,11 @@ final class StatusController extends Controller
             'EXTRA_DB_PASS',
             'EXTRA_SQLITE_PATH',
             'DOCUMENTS_ROOT_PATH',
+            'IMAGES_ROOT_PATH',
             'XT_API_URL',
             'XT_API_KEY',
             'XT_DOCUMENTS_TARGET_PATH',
+            'XT_IMAGES_TARGET_PATH',
             'STAGE_DB_HOST',
             'STAGE_DB_PORT',
             'STAGE_DB_NAME',

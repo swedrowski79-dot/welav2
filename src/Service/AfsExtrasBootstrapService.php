@@ -125,17 +125,18 @@ final class AfsExtrasBootstrapService
 
         $this->extraTargetDb->exec(
             'CREATE TABLE IF NOT EXISTS `attribute_translations` (
-                `id` INT NOT NULL PRIMARY KEY,
-                `article_id` INT NULL,
-                `article_number` VARCHAR(255) NULL,
-                `sort_order` INT NULL,
-                `language` VARCHAR(10) NULL,
-                `attribute_name` VARCHAR(255) NULL,
-                `attribute_value` VARCHAR(255) NULL,
+                `id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `source_text` VARCHAR(255) NOT NULL,
+                `normalized_key` VARCHAR(255) NOT NULL,
+                `de` VARCHAR(255) NULL,
+                `en` VARCHAR(255) NULL,
+                `fr` VARCHAR(255) NULL,
+                `nl` VARCHAR(255) NULL,
                 `source_directory` VARCHAR(255) NULL,
-                KEY `idx_attribute_translations_article_id` (`article_id`),
-                KEY `idx_attribute_translations_article_number` (`article_number`),
-                KEY `idx_attribute_translations_language` (`language`)
+                `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                UNIQUE KEY `uniq_attribute_translations_normalized_key` (`normalized_key`),
+                KEY `idx_attribute_translations_is_active` (`is_active`),
+                KEY `idx_attribute_translations_source_text` (`source_text`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
         );
     }

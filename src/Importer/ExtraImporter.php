@@ -27,8 +27,10 @@ class ExtraImporter
 
     public function importAttributeTranslations(): void
     {
-        $stmt = $this->runEntityQuery('attribute_translations');
-        $this->importIntoTable($stmt, 'extra.attribute_translations', 'raw_extra_attribute_translations');
+        throw new RuntimeException(
+            'Attribute translations are no longer imported directly from afs_extras. '
+            . 'Use AttributeTranslationProjectionService to rebuild raw_extra_attribute_translations.'
+        );
     }
 
     private function runEntityQuery(string $entityName): PDOStatement

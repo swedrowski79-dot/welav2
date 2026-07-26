@@ -1,10 +1,40 @@
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: welav2-mysql
+    entrypoint: ["/bin/bash", "/opt/welav2/mysql/entrypoint.sh"]
+    command:
+      - mysqld
+      - --default-authentication-plugin=mysql_native_password
+      - --skip-log-bin
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: ${STAGE_DB_NAME:-stage_sync}
+      MYSQL_USER: ${STAGE_DB_USER:-stage}
+      MYSQL_PASSWORD: ${STAGE_DB_PASS:-stage}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_RAMDISK_ENABLED: ${MYSQL_RAMDISK_ENABLED:-1}
+    volumes:
+      - mysql_data:/var/lib/mysql-persistent
+      - ./docker/mysql:/opt/welav2/mysql:ro
+      - ./database.sql:/docker-entrypoint-initdb.d/20-stage-schema.sql:ro
+    tmpfs:
+      - /mnt/mysql-ram:size=${MYSQL_RAMDISK_SIZE_BYTES:-8589934592}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
   php:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: welav2-php
     working_dir: /app
-    command: ["php", "-S", "0.0.0.0:8080", "-t", "public"]
     ports:
       - "8080:8080"
     volumes:
@@ -17,46 +47,29 @@ services:
       AFS_DB_PASS: ${AFS_DB_PASS:-}
       XT_API_URL: ${XT_API_URL:-http://10.0.1.104/wela-api}
       XT_API_KEY: ${XT_API_KEY:-}
-      STAGE_DB_HOST: ${STAGE_DB_HOST:-mysql}
-      STAGE_DB_PORT: ${STAGE_DB_PORT:-3306}
+      STAGE_DB_HOST: mysql
+      STAGE_DB_PORT: 3306
       STAGE_DB_NAME: ${STAGE_DB_NAME:-stage_sync}
       STAGE_DB_USER: ${STAGE_DB_USER:-stage}
       STAGE_DB_PASS: ${STAGE_DB_PASS:-stage}
-      EXTRA_DB_HOST: ${EXTRA_DB_HOST:-mysql}
-      EXTRA_DB_PORT: ${EXTRA_DB_PORT:-3306}
+      EXTRA_DB_HOST: mysql
+      EXTRA_DB_PORT: 3306
       EXTRA_DB_NAME: ${EXTRA_DB_NAME:-afs_extras}
-      EXTRA_DB_USER: ${EXTRA_DB_USER:-stage}
-      EXTRA_DB_PASS: ${EXTRA_DB_PASS:-stage}
+      EXTRA_DB_USER: ${STAGE_DB_USER:-stage}
+      EXTRA_DB_PASS: ${STAGE_DB_PASS:-stage}
       EXTRA_SQLITE_PATH: ${EXTRA_SQLITE_PATH:-/app/data/extra.sqlite}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       mysql:
         condition: service_healthy
-
-  mysql:
-    image: mysql:8.0
-    entrypoint: ["/bin/bash", "/opt/welav2/mysql/entrypoint.sh"]
-    command: ["mysqld", "--default-authentication-plugin=mysql_native_password", "--skip-log-bin"]
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_DATABASE: stage_sync
-      MYSQL_USER: stage
-      MYSQL_PASSWORD: stage
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_RAMDISK_ENABLED: ${MYSQL_RAMDISK_ENABLED:-1}
-    volumes:
-      - mysql_data:/var/lib/mysql-persistent
-      - ./docker/mysql:/opt/welav2/mysql:ro
-      - ./database.sql:/docker-entrypoint-initdb.d/20-stage-schema.sql:ro
-    tmpfs:
-      - /mnt/mysql-ram:size=${MYSQL_RAMDISK_SIZE_BYTES:-8589934592}
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+    command:
+      - sh
+      - -c
+      - |
+        php /app/scripts/setup-database.php || echo "[db-setup] WARNUNG: Setup hatte Fehler; Webserver startet trotzdem."
+        exec php -S 0.0.0.0:8080 -t public
+    restart: unless-stopped
 
 volumes:
   mysql_data:

@@ -2,6 +2,9 @@
 
 class ProductDeltaService
 {
+    private const ATTRIBUTE_DICTIONARY_TABLE = 'attribute_translations';
+    private const ATTRIBUTE_LANGUAGES = ['de', 'en', 'fr', 'nl'];
+
     private string $configKey;
     private string $entityLabel;
     private string $entityType;
@@ -29,9 +32,11 @@ class ProductDeltaService
     private array $entityOrderBy = [];
     private array $pendingQueueEntities = [];
     private array $queuedEntries = [];
+    private ?array $attributeDictionary = null;
 
     public function __construct(
         private PDO $stageDb,
+        private ?PDO $extraDb,
         private array $deltaConfig,
         private ?SyncMonitor $monitor = null,
         private ?int $runId = null,
@@ -357,6 +362,20 @@ class ProductDeltaService
 
     private function fetchEntities(): array
     {
+        if ($this->entityType === 'product' && $this->stageTable === 'stage_products') {
+            $stmt = $this->stageDb->query(
+                "SELECT products.*, primary_media.file_name AS primary_image\n"
+                . "FROM `stage_products` products\n"
+                . "LEFT JOIN `stage_product_media` primary_media\n"
+                . "  ON primary_media.afs_artikel_id = products.afs_artikel_id\n"
+                . " AND primary_media.type = 'images'\n"
+                . " AND primary_media.position = 1\n"
+                . "ORDER BY {$this->entityOrderBySql()}"
+            );
+
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
         $stmt = $this->stageDb->query("SELECT * FROM `{$this->stageTable}` ORDER BY {$this->entityOrderBySql()}");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -429,6 +448,111 @@ class ProductDeltaService
         }
 
         return $attributes;
+    }
+
+    private function buildProductAttributesFromDictionary(array $entities): array
+    {
+        $dictionary = $this->fetchAttributeDictionary();
+        $attributes = [];
+
+        foreach ($entities as $entity) {
+            if (!is_array($entity)) {
+                continue;
+            }
+
+            $entityId = $this->normalizeEntityId($entity[$this->identityField] ?? null);
+            if ($entityId === null) {
+                continue;
+            }
+
+            $sku = $this->normalizeString($entity['sku'] ?? null);
+
+            foreach ([1, 2, 3, 4] as $sortOrder) {
+                $attributeName = $this->normalizeString($entity['attribute_name' . $sortOrder] ?? null);
+                $attributeValue = $this->normalizeString($entity['attribute_value' . $sortOrder] ?? null);
+
+                if ($attributeName === null || $attributeValue === null) {
+                    continue;
+                }
+
+                foreach (self::ATTRIBUTE_LANGUAGES as $languageCode) {
+                    $translatedName = $this->translateAttributeText($attributeName, $languageCode, $dictionary);
+                    $translatedValue = $this->translateAttributeText($attributeValue, $languageCode, $dictionary);
+
+                    if ($translatedName === null || $translatedValue === null) {
+                        continue;
+                    }
+
+                    $attributes[$entityId][] = [
+                        'afs_artikel_id' => $entityId,
+                        'sku' => $sku,
+                        'language_code' => $languageCode,
+                        'sort_order' => $sortOrder,
+                        'attribute_name' => $translatedName,
+                        'attribute_value' => $translatedValue,
+                        'source_directory' => 'attribute_dictionary',
+                    ];
+                }
+            }
+        }
+
+        return $attributes;
+    }
+
+    private function fetchAttributeDictionary(): array
+    {
+        if ($this->attributeDictionary !== null) {
+            return $this->attributeDictionary;
+        }
+
+        if ($this->extraDb === null) {
+            return $this->attributeDictionary = [];
+        }
+
+        $stmt = $this->extraDb->query(
+            'SELECT `normalized_key`, `de`, `en`, `fr`, `nl`
+             FROM `' . self::ATTRIBUTE_DICTIONARY_TABLE . '`
+             WHERE `is_active` = 1'
+        );
+
+        $dictionary = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $normalizedKey = trim((string) ($row['normalized_key'] ?? ''));
+            if ($normalizedKey === '') {
+                continue;
+            }
+
+            $dictionary[$normalizedKey] = [
+                'de' => $this->normalizeString($row['de'] ?? null),
+                'en' => $this->normalizeString($row['en'] ?? null),
+                'fr' => $this->normalizeString($row['fr'] ?? null),
+                'nl' => $this->normalizeString($row['nl'] ?? null),
+            ];
+        }
+
+        return $this->attributeDictionary = $dictionary;
+    }
+
+    private function translateAttributeText(string $sourceText, string $languageCode, array $dictionary): ?string
+    {
+        if ($languageCode === 'de') {
+            return $sourceText;
+        }
+
+        $entry = $dictionary[$this->normalizeAttributeKey($sourceText)] ?? null;
+        if (!is_array($entry)) {
+            return null;
+        }
+
+        return $this->normalizeString($entry[$languageCode] ?? null);
+    }
+
+    private function normalizeAttributeKey(string $value): string
+    {
+        $normalized = trim(mb_strtolower($value));
+        $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
+
+        return $normalized;
     }
 
     private function fetchStates(): array
@@ -532,7 +656,8 @@ class ProductDeltaService
                 p.products_weight AS weight,
                 p.products_status AS online_flag,
                 p.products_master_flag AS is_master,
-                p.products_master_model AS master_sku
+                p.products_master_model AS master_sku,
+                p.products_image AS primary_image
              FROM `xt_mirror_products` p
              WHERE p.external_id IS NOT NULL
              ORDER BY p.external_id ASC"
@@ -554,6 +679,7 @@ class ProductDeltaService
                 'weight' => $this->normalizeDecimalValue($row['weight'] ?? null),
                 'online_flag' => $this->normalizeScalar($row['online_flag'] ?? null),
                 'is_master' => $this->normalizeScalar($row['is_master'] ?? null),
+                'primary_image' => $this->normalizeScalar($row['primary_image'] ?? null),
                 'master_sku' => $this->normalizeScalar($row['master_sku'] ?? null),
                 'category_afs_id' => $productId !== null ? ($categoryMap[$productId] ?? null) : null,
                 'translation_hash' => $productId !== null ? ($translationHashes[$productId] ?? null) : null,
@@ -764,6 +890,8 @@ class ProductDeltaService
                 relation.products_id,
                 child_description.language_code,
                 COALESCE(parent_attribute.sort_order, attribute.sort_order) AS sort_order,
+                parent_attribute.attributes_model AS parent_attributes_model,
+                attribute.attributes_model AS child_attributes_model,
                 parent_description.attributes_name AS parent_attributes_name,
                 child_description.attributes_name AS child_attributes_name,
                 child_description.attributes_desc AS child_attributes_desc
@@ -803,6 +931,8 @@ class ProductDeltaService
             $grouped[$productId][] = [
                 'language_code' => $languageCode,
                 'sort_order' => isset($row['sort_order']) ? (int) $row['sort_order'] : null,
+                'parent_attribute_model' => $this->normalizeScalar($row['parent_attributes_model'] ?? null),
+                'child_attribute_model' => $this->normalizeScalar($row['child_attributes_model'] ?? null),
                 'attribute_name' => $attributeName,
                 'attribute_value' => $attributeValue,
             ];
@@ -853,7 +983,7 @@ class ProductDeltaService
     {
         $stmt = $this->stageDb->query(
             "SELECT
-                media.external_id AS entity_id,
+                stage.afs_document_id AS entity_id,
                 product.external_id AS afs_artikel_id,
                 media.file AS file_name,
                 COALESCE(media.type, link.type) AS document_type,
@@ -861,11 +991,14 @@ class ProductDeltaService
              FROM `xt_mirror_media_link` link
              INNER JOIN `xt_mirror_media` media ON media.id = link.m_id
              LEFT JOIN `xt_mirror_products` product ON product.products_id = link.link_id
+             INNER JOIN `stage_product_documents` stage
+                ON stage.afs_artikel_id = CAST(product.external_id AS UNSIGNED)
+               AND stage.file_name = media.file
+               AND stage.sort_order = link.sort_order
              WHERE (link.class IS NULL OR link.class = 'product')
                AND link.type = 'files'
-               AND media.external_id IS NOT NULL
                AND product.external_id IS NOT NULL
-             ORDER BY media.external_id ASC"
+             ORDER BY stage.afs_document_id ASC"
         );
 
         $rows = [];
@@ -978,31 +1111,15 @@ class ProductDeltaService
 
     private function nextAction(?array $state, string $hash, array $mirrorDecision): ?string
     {
-        if (!(bool) ($mirrorDecision['enabled'] ?? false)) {
-            if ($state === null) {
-                return 'insert';
-            }
-
-            if (($state[$this->stateHashField] ?? null) !== $hash) {
-                return 'update';
-            }
-
-            return null;
-        }
-
-        if (!(bool) ($mirrorDecision['exists'] ?? false)) {
-            return 'insert';
-        }
-
         if ($state === null) {
-            return 'update';
+            return (bool) ($mirrorDecision['exists'] ?? false) ? 'update' : 'insert';
         }
 
         if (($state[$this->stateHashField] ?? null) !== $hash) {
             return 'update';
         }
 
-        return 'update';
+        return null;
     }
 
     private function enqueue(string $entityId, string $action, array $payloadData, string $hash): bool
@@ -1348,6 +1465,28 @@ class ProductDeltaService
             return null;
         }
 
+        $baseAttributesBySortOrder = [];
+        foreach ($attributes as $attribute) {
+            if (!is_array($attribute)) {
+                continue;
+            }
+
+            $sortOrder = isset($attribute['sort_order']) ? (int) $attribute['sort_order'] : 0;
+            $attributeName = $this->normalizeScalar($attribute['attribute_name'] ?? null);
+            $attributeValue = $this->normalizeScalar($attribute['attribute_value'] ?? null);
+            if ($sortOrder <= 0 || $attributeName === null || $attributeValue === null) {
+                continue;
+            }
+
+            $languageCode = $this->normalizeString($attribute['language_code'] ?? null);
+            if (!isset($baseAttributesBySortOrder[$sortOrder]) || $languageCode === 'de') {
+                $baseAttributesBySortOrder[$sortOrder] = [
+                    'parent_attribute_model' => $attributeName,
+                    'child_attribute_model' => $attributeValue,
+                ];
+            }
+        }
+
         $normalized = [];
         foreach ($attributes as $attribute) {
             if (!is_array($attribute)) {
@@ -1359,9 +1498,13 @@ class ProductDeltaService
                 continue;
             }
 
+            $sortOrder = isset($attribute['sort_order']) ? (int) $attribute['sort_order'] : null;
+            $baseAttribute = $sortOrder !== null ? ($baseAttributesBySortOrder[$sortOrder] ?? []) : [];
             $normalized[] = [
                 'language_code' => $languageCode,
-                'sort_order' => isset($attribute['sort_order']) ? (int) $attribute['sort_order'] : null,
+                'sort_order' => $sortOrder,
+                'parent_attribute_model' => $this->normalizeScalar($baseAttribute['parent_attribute_model'] ?? null),
+                'child_attribute_model' => $this->normalizeScalar($baseAttribute['child_attribute_model'] ?? null),
                 'attribute_name' => $this->normalizeScalar($attribute['attribute_name'] ?? null),
                 'attribute_value' => $this->normalizeScalar($attribute['attribute_value'] ?? null),
             ];

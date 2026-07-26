@@ -6,6 +6,7 @@ class DeltaRunnerService
 
     public function __construct(
         private PDO $stageDb,
+        private ?PDO $extraDb,
         private array $deltaConfig,
         private ?SyncMonitor $monitor = null,
         private ?int $runId = null
@@ -39,6 +40,7 @@ class DeltaRunnerService
         foreach ($this->configKeys as $configKey) {
             $stats = (new ProductDeltaService(
                 $this->stageDb,
+                $this->extraDb,
                 $this->deltaConfig,
                 $this->monitor,
                 $this->runId,

@@ -53,6 +53,13 @@ $fieldGroups = [
         'XT_DOCUMENTS_TARGET_PATH' => 'Zielpfad im Shop',
         ],
     ],
+    'Bilder' => [
+        'source' => 'xt',
+        'fields' => [
+        'IMAGES_ROOT_PATH' => 'Bildpfad',
+        'XT_IMAGES_TARGET_PATH' => 'Bild-Zielpfad im Shop',
+        ],
+    ],
 ];
 ?>
 
@@ -172,14 +179,16 @@ $fieldGroups = [
                                             'XT_API_URL' => 'url',
                                             'XT_API_KEY' => 'key',
                                             'XT_DOCUMENTS_TARGET_PATH' => 'path',
+                                            'XT_IMAGES_TARGET_PATH' => 'path',
                                             'EXTRA_SQLITE_PATH' => 'path',
                                             'DOCUMENTS_ROOT_PATH' => 'path',
+                                            'IMAGES_ROOT_PATH' => 'path',
                                         }] ?? '');
                                         $type = str_ends_with($field, '_PASS') || str_ends_with($field, '_KEY') ? 'password' : 'text';
                                         ?>
                                         <div class="col-12 col-md-6">
                                             <label class="form-label" for="<?= Html::escape($field) ?>"><?= Html::escape($label) ?></label>
-                                            <?php if ($field === 'XT_DOCUMENTS_TARGET_PATH'): ?>
+                                            <?php if ($field === 'XT_DOCUMENTS_TARGET_PATH' || $field === 'XT_IMAGES_TARGET_PATH'): ?>
                                                 <div class="input-group">
                                                     <input
                                                         class="form-control"
@@ -193,13 +202,13 @@ $fieldGroups = [
                                                         type="button"
                                                         data-folder-browser-trigger="true"
                                                         data-browser-endpoint="/status/browse-api-tree"
-                                                        data-browser-input="XT_DOCUMENTS_TARGET_PATH"
-                                                        data-browser-title="Shop-Zielpfad waehlen"
+                                                        data-browser-input="<?= Html::escape($field) ?>"
+                                                        data-browser-title="<?= Html::escape($field === 'XT_IMAGES_TARGET_PATH' ? 'Shop-Bildpfad waehlen' : 'Shop-Zielpfad waehlen') ?>"
                                                         data-browser-root=""
                                                     >Browser</button>
                                                 </div>
                                                 <div class="form-text">Der Browser liest Verzeichnisse direkt ueber die XT-API auf dem Shop-Server.</div>
-                                            <?php elseif ($field === 'DOCUMENTS_ROOT_PATH'): ?>
+                                            <?php elseif ($field === 'DOCUMENTS_ROOT_PATH' || $field === 'IMAGES_ROOT_PATH'): ?>
                                                 <div class="input-group">
                                                     <input
                                                         class="form-control"
@@ -212,9 +221,9 @@ $fieldGroups = [
                                                         class="btn btn-outline-secondary"
                                                         type="button"
                                                         data-folder-browser-trigger="true"
-                                                        data-browser-endpoint="/document-files/browse-tree"
-                                                        data-browser-input="DOCUMENTS_ROOT_PATH"
-                                                        data-browser-title="Lokalen Dokumentpfad waehlen"
+                                                        data-browser-endpoint="<?= Html::escape($field === 'IMAGES_ROOT_PATH' ? '/image-files/browse-tree' : '/document-files/browse-tree') ?>"
+                                                        data-browser-input="<?= Html::escape($field) ?>"
+                                                        data-browser-title="<?= Html::escape($field === 'IMAGES_ROOT_PATH' ? 'Lokalen Bildpfad waehlen' : 'Lokalen Dokumentpfad waehlen') ?>"
                                                         data-browser-root="/"
                                                     >Browser</button>
                                                 </div>
