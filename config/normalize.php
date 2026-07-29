@@ -122,6 +122,7 @@ return [
                 'original_name'    => 'original_name',
                 'language_code'    => 'language',
                 'name'             => 'translated_name',
+                'description'      => 'description',
                 'meta_title'       => 'meta_title',
                 'meta_description' => 'meta_description',
             ],

@@ -94,6 +94,9 @@ final class CategorySyncService
                     $seoColumns = \wela_preserve_existing_seo_url_columns($this->pdo, $seoIdentity, $seoColumns);
                 }
 
+                $seoRow = array_replace($seoIdentity, $seoColumns);
+                $this->replaceStaleSeoUrlRows($seoIdentity, $seoRow);
+
                 \wela_upsert_row(
                     $this->pdo,
                     'xt_seo_url',
@@ -121,6 +124,76 @@ final class CategorySyncService
 
             throw $exception;
         }
+    }
+
+    private function replaceStaleSeoUrlRows(array $identity, array $seoRow): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT `url_text`
+             FROM `xt_seo_url`
+             WHERE `link_type` = :link_type
+               AND `link_id` = :link_id
+               AND `language_code` = :language_code
+               AND `store_id` = :store_id'
+        );
+        $stmt->execute([
+            ':link_type' => (int) ($identity['link_type'] ?? 0),
+            ':link_id' => (int) ($identity['link_id'] ?? 0),
+            ':language_code' => (string) ($identity['language_code'] ?? ''),
+            ':store_id' => (int) ($identity['store_id'] ?? 0),
+        ]);
+        $existingRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($existingRows === []) {
+            return false;
+        }
+
+        $newUrl = trim((string) ($seoRow['url_text'] ?? ''), '/');
+
+        // Ohne eine neue kanonische URL darf keine bestehende URL entfernt werden.
+        if ($newUrl === '') {
+            return false;
+        }
+
+        $hasExactlyOneCanonicalRow = count($existingRows) === 1
+            && trim((string) ($existingRows[0]['url_text'] ?? ''), '/') === $newUrl;
+
+        if ($hasExactlyOneCanonicalRow) {
+            return false;
+        }
+
+        foreach ($existingRows as $existingRow) {
+            $oldUrl = trim((string) ($existingRow['url_text'] ?? ''), '/');
+            if ($oldUrl === '' || $oldUrl === $newUrl) {
+                continue;
+            }
+
+            \wela_queue_seo_redirect(
+                $this->pdo,
+                $oldUrl,
+                $newUrl,
+                (string) ($identity['language_code'] ?? ''),
+                (int) ($identity['link_type'] ?? 0),
+                (int) ($identity['link_id'] ?? 0),
+                (int) ($identity['store_id'] ?? 0)
+            );
+        }
+
+        $deleteStmt = $this->pdo->prepare(
+            'DELETE FROM `xt_seo_url`
+             WHERE `link_type` = :link_type
+               AND `link_id` = :link_id
+               AND `language_code` = :language_code
+               AND `store_id` = :store_id'
+        );
+        $deleteStmt->execute([
+            ':link_type' => (int) ($identity['link_type'] ?? 0),
+            ':link_id' => (int) ($identity['link_id'] ?? 0),
+            ':language_code' => (string) ($identity['language_code'] ?? ''),
+            ':store_id' => (int) ($identity['store_id'] ?? 0),
+        ]);
+
+        return true;
     }
 
     public function syncCategoriesBatchRequest(array $request): array

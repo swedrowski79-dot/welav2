@@ -38,7 +38,9 @@ return [
         ],
         'mirror_translation_hash_field' => 'translation_hash',
         'mirror_seo_hash_field' => 'seo_hash',
+        'mirror_required_seo_languages' => ['de', 'en', 'fr', 'nl'],
         'mirror_require_success_run' => true,
+        'seo_path_dependency' => true,
         'entity_order_by' => ['level ASC', 'afs_wg_id ASC'],
         'hash_fields' => [
             'afs_wg_id',
@@ -85,7 +87,10 @@ return [
             'product.category_afs_id' => 'category_afs_id',
             'product.primary_image' => 'primary_image',
         ],
+        'mirror_translation_hash_field' => 'translation_hash',
+        'mirror_required_seo_languages' => ['de', 'en', 'fr', 'nl'],
         'mirror_require_success_run' => true,
+        'seo_path_dependency' => true,
         'hash_fields' => [
             'afs_artikel_id',
             'sku',
@@ -133,6 +138,8 @@ return [
         ],
         'monitor_source' => 'delta_media',
         'mirror_require_success_run' => true,
+        'mirror_repair_missing' => true,
+        'exclude_primary_image' => true,
         'mirror_compare_fields' => [
             'media_external_id' => 'media_external_id',
             'afs_artikel_id' => 'afs_artikel_id',

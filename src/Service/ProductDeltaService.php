@@ -4,6 +4,7 @@ class ProductDeltaService
 {
     private const ATTRIBUTE_DICTIONARY_TABLE = 'attribute_translations';
     private const ATTRIBUTE_LANGUAGES = ['de', 'en', 'fr', 'nl'];
+    private const SEO_LANGUAGES = ['de', 'en', 'fr', 'nl'];
 
     private string $configKey;
     private string $entityLabel;
@@ -28,7 +29,11 @@ class ProductDeltaService
     private ?string $mirrorTranslationHashField = null;
     private ?string $mirrorAttributeHashField = null;
     private ?string $mirrorSeoHashField = null;
+    private array $mirrorRequiredSeoLanguages = [];
     private bool $mirrorRequireSuccessRun = true;
+    private bool $mirrorRepairMissing = false;
+    private bool $seoPathDependency = false;
+    private bool $excludePrimaryImage = false;
     private array $entityOrderBy = [];
     private array $pendingQueueEntities = [];
     private array $queuedEntries = [];
@@ -58,6 +63,9 @@ class ProductDeltaService
         $entities = $this->fetchEntities();
         $translations = $this->fetchTranslations();
         $attributes = $this->fetchAttributes();
+        $seoPathDependencyHashes = $this->seoPathDependency
+            ? $this->buildSeoPathDependencyHashes($entities)
+            : [];
         $states = $this->fetchStates();
         $mirrorContext = $this->fetchMirrorRows();
         $mirrorRows = $mirrorContext['rows'];
@@ -78,6 +86,8 @@ class ProductDeltaService
             'mirror_matched' => 0,
             'mirror_missing' => 0,
             'mirror_mismatched' => 0,
+            'mirror_repairs' => 0,
+            'mirror_seo_repairs' => 0,
             'mirror_removed_skipped' => 0,
             'mirror_enabled' => $mirrorEnabled,
         ];
@@ -122,6 +132,9 @@ class ProductDeltaService
                     $translations[$entityId] ?? [],
                     $attributes[$entityId] ?? []
                 );
+                if ($this->seoPathDependency) {
+                    $payloadData['_seo_path_dependency_hash'] = $seoPathDependencyHashes[$entityId] ?? null;
+                }
                 $hash = $this->buildHash($payloadData);
 
                 $updateHashStmt->execute([
@@ -131,8 +144,27 @@ class ProductDeltaService
 
                 $state = $states[$entityId] ?? null;
                 $mirrorDecision = $this->mirrorDecision($payloadData, $mirrorRows[$entityId] ?? null, $mirrorEnabled);
+                if ($this->seoPathDependency
+                    && ($mirrorDecision['matched'] ?? false) === true
+                    && ($state === null || ($state[$this->stateHashField] ?? null) !== $hash)
+                ) {
+                    $mirrorDecision = [
+                        'enabled' => true,
+                        'matched' => false,
+                        'exists' => true,
+                        'repair' => true,
+                        'repair_reason' => 'seo_dependency',
+                    ];
+                }
 
                 if ($mirrorEnabled) {
+                    if (($mirrorDecision['repair'] ?? false) === true) {
+                        $stats['mirror_repairs']++;
+                        if (($mirrorDecision['repair_reason'] ?? null) !== 'missing') {
+                            $stats['mirror_seo_repairs']++;
+                        }
+                    }
+
                     if ($mirrorDecision['matched']) {
                         $stats['mirror_matched']++;
                     } elseif ($mirrorDecision['exists']) {
@@ -273,6 +305,8 @@ class ProductDeltaService
                 'mirror_matched' => $stats['mirror_matched'],
                 'mirror_missing' => $stats['mirror_missing'],
                 'mirror_mismatched' => $stats['mirror_mismatched'],
+                'mirror_repairs' => $stats['mirror_repairs'],
+                'mirror_seo_repairs' => $stats['mirror_seo_repairs'],
                 'mirror_removed_skipped' => $stats['mirror_removed_skipped'],
                 'mirror_live_removed' => $stats['mirror_live_removed'],
                 'pending_before' => $stats['pending_before'],
@@ -295,6 +329,8 @@ class ProductDeltaService
                 'mirror_matched' => $stats['mirror_matched'],
                 'mirror_missing' => $stats['mirror_missing'],
                 'mirror_mismatched' => $stats['mirror_mismatched'],
+                'mirror_repairs' => $stats['mirror_repairs'],
+                'mirror_seo_repairs' => $stats['mirror_seo_repairs'],
                 'mirror_removed_skipped' => $stats['mirror_removed_skipped'],
                 'mirror_live_removed' => $stats['mirror_live_removed'],
                 'result_reason' => $stats['result_reason'],
@@ -333,8 +369,12 @@ class ProductDeltaService
         $this->mirrorTranslationHashField = $this->normalizeFieldName($config['mirror_translation_hash_field'] ?? null);
         $this->mirrorAttributeHashField = $this->normalizeFieldName($config['mirror_attribute_hash_field'] ?? null);
         $this->mirrorSeoHashField = $this->normalizeFieldName($config['mirror_seo_hash_field'] ?? null);
+        $this->mirrorRequiredSeoLanguages = $this->normalizeLanguageCodes($config['mirror_required_seo_languages'] ?? null);
         $this->mirrorRequireSuccessRun = !array_key_exists('mirror_require_success_run', $config)
             || (bool) $config['mirror_require_success_run'];
+        $this->mirrorRepairMissing = (bool) ($config['mirror_repair_missing'] ?? false);
+        $this->seoPathDependency = (bool) ($config['seo_path_dependency'] ?? false);
+        $this->excludePrimaryImage = (bool) ($config['exclude_primary_image'] ?? false);
         $this->entityOrderBy = $this->normalizeOrderBy($config['entity_order_by'] ?? null);
     }
 
@@ -360,6 +400,25 @@ class ProductDeltaService
         return $field === '' ? null : $field;
     }
 
+    private function normalizeLanguageCodes(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $languageCodes = [];
+        foreach ($value as $languageCode) {
+            $normalized = $this->normalizeString($languageCode);
+            if ($normalized === null || !in_array($normalized, self::SEO_LANGUAGES, true)) {
+                continue;
+            }
+
+            $languageCodes[$normalized] = true;
+        }
+
+        return array_keys($languageCodes);
+    }
+
     private function fetchEntities(): array
     {
         if ($this->entityType === 'product' && $this->stageTable === 'stage_products') {
@@ -376,7 +435,16 @@ class ProductDeltaService
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        $stmt = $this->stageDb->query("SELECT * FROM `{$this->stageTable}` ORDER BY {$this->entityOrderBySql()}");
+        $whereSql = '';
+        if ($this->entityType === 'media' && $this->excludePrimaryImage) {
+            $whereSql = " WHERE COALESCE(`type`, '') <> 'images'"
+                . " OR (COALESCE(`position`, 0) <> 1 AND COALESCE(`source_slot`, '') <> 'image_1')";
+        }
+
+        $stmt = $this->stageDb->query(
+            "SELECT * FROM `{$this->stageTable}`{$whereSql} ORDER BY {$this->entityOrderBySql()}"
+        );
+
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -448,6 +516,206 @@ class ProductDeltaService
         }
 
         return $attributes;
+    }
+
+    private function buildSeoPathDependencyHashes(array $entities): array
+    {
+        if (!in_array($this->entityType, ['category', 'product'], true)) {
+            return [];
+        }
+
+        $categoryPathHashes = $this->fetchCategorySeoPathDependencyHashes();
+        $dependencyHashes = [];
+
+        if ($this->entityType === 'category') {
+            foreach ($entities as $entity) {
+                $entityId = $this->normalizeEntityId($entity[$this->identityField] ?? null);
+                if ($entityId === null) {
+                    continue;
+                }
+
+                $dependencyHashes[$entityId] = $categoryPathHashes[$entityId]
+                    ?? $this->buildHash([
+                        'category_id' => $entityId,
+                        'paths' => null,
+                    ]);
+            }
+
+            return $dependencyHashes;
+        }
+
+        $productsBySku = [];
+        foreach ($entities as $entity) {
+            $sku = $this->normalizeString($entity['sku'] ?? null);
+            if ($sku === null) {
+                continue;
+            }
+
+            $productsBySku[$sku] = $entity;
+        }
+
+        foreach ($entities as $entity) {
+            $entityId = $this->normalizeEntityId($entity[$this->identityField] ?? null);
+            if ($entityId === null) {
+                continue;
+            }
+
+            $categoryId = $this->resolvedProductCategoryIdForSeoDependency($entity, $productsBySku);
+            $dependencyHashes[$entityId] = $this->buildHash([
+                'resolved_category_id' => $categoryId,
+                'category_path_hash' => $categoryId !== null ? ($categoryPathHashes[$categoryId] ?? null) : null,
+            ]);
+        }
+
+        return $dependencyHashes;
+    }
+
+    private function fetchCategorySeoPathDependencyHashes(): array
+    {
+        $categoryStmt = $this->stageDb->query(
+            "SELECT afs_wg_id, parent_afs_id, name_default
+             FROM `stage_categories`
+             WHERE afs_wg_id IS NOT NULL
+             ORDER BY afs_wg_id ASC"
+        );
+
+        $categories = [];
+        while ($row = $categoryStmt->fetch(PDO::FETCH_ASSOC)) {
+            $categoryId = $this->normalizeCategoryId($row['afs_wg_id'] ?? null);
+            if ($categoryId === null) {
+                continue;
+            }
+
+            $categories[$categoryId] = [
+                'parent_id' => $this->normalizeCategoryId($row['parent_afs_id'] ?? null),
+                'name_default' => $this->normalizeString($row['name_default'] ?? null),
+            ];
+        }
+
+        $translationStmt = $this->stageDb->query(
+            "SELECT afs_wg_id, language_code, name
+             FROM `stage_category_translations`
+             WHERE afs_wg_id IS NOT NULL
+             ORDER BY afs_wg_id ASC, language_code ASC"
+        );
+
+        $translations = [];
+        while ($row = $translationStmt->fetch(PDO::FETCH_ASSOC)) {
+            $categoryId = $this->normalizeCategoryId($row['afs_wg_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($categoryId === null || $languageCode === null || !in_array($languageCode, self::SEO_LANGUAGES, true)) {
+                continue;
+            }
+
+            $translations[$categoryId][$languageCode] = $this->normalizeString($row['name'] ?? null);
+        }
+
+        $hashes = [];
+        foreach (array_keys($categories) as $categoryId) {
+            $paths = [];
+
+            foreach (self::SEO_LANGUAGES as $languageCode) {
+                $paths[$languageCode] = $this->categorySeoDependencyPath(
+                    $categoryId,
+                    $languageCode,
+                    $categories,
+                    $translations
+                );
+            }
+
+            $hashes[$categoryId] = $this->buildHash([
+                'category_id' => $categoryId,
+                'paths' => $paths,
+            ]);
+        }
+
+        return $hashes;
+    }
+
+    private function categorySeoDependencyPath(
+        string $categoryId,
+        string $languageCode,
+        array $categories,
+        array $translations
+    ): array {
+        $leafFirstPath = [];
+        $visited = [];
+        $currentId = $categoryId;
+
+        while (isset($categories[$currentId]) && !isset($visited[$currentId])) {
+            $visited[$currentId] = true;
+            $leafFirstPath[] = [
+                'category_id' => $currentId,
+                'name' => $translations[$currentId][$languageCode]
+                    ?? $translations[$currentId]['de']
+                    ?? $categories[$currentId]['name_default']
+                    ?? null,
+            ];
+
+            $parentId = $categories[$currentId]['parent_id'] ?? null;
+            if (!is_string($parentId) || $parentId === '') {
+                break;
+            }
+
+            $currentId = $parentId;
+        }
+
+        if (isset($visited[$currentId]) && ($categories[$currentId]['parent_id'] ?? null) !== null) {
+            $leafFirstPath[] = [
+                'category_id' => $currentId,
+                'cycle' => true,
+            ];
+        }
+
+        return array_reverse($leafFirstPath);
+    }
+
+    private function resolvedProductCategoryIdForSeoDependency(array $product, array $productsBySku): ?string
+    {
+        if ($this->isTruthy($product['is_slave'] ?? null)) {
+            $masterSku = $this->normalizeString($product['master_sku'] ?? null);
+            if ($masterSku !== null) {
+                $masterCategoryId = $this->resolvedProductCategoryIdForSku(
+                    $masterSku,
+                    $productsBySku,
+                    [$masterSku => true]
+                );
+                if ($masterCategoryId !== null) {
+                    return $masterCategoryId;
+                }
+            }
+        }
+
+        return $this->normalizeCategoryId($product['category_afs_id'] ?? null);
+    }
+
+    private function resolvedProductCategoryIdForSku(
+        string $sku,
+        array $productsBySku,
+        array $visited
+    ): ?string {
+        $product = $productsBySku[$sku] ?? null;
+        if (!is_array($product)) {
+            return null;
+        }
+
+        $categoryId = $this->normalizeCategoryId($product['category_afs_id'] ?? null);
+        if ($categoryId !== null) {
+            return $categoryId;
+        }
+
+        if (!$this->isTruthy($product['is_slave'] ?? null)) {
+            return null;
+        }
+
+        $masterSku = $this->normalizeString($product['master_sku'] ?? null);
+        if ($masterSku === null || isset($visited[$masterSku])) {
+            return null;
+        }
+
+        $visited[$masterSku] = true;
+
+        return $this->resolvedProductCategoryIdForSku($masterSku, $productsBySku, $visited);
     }
 
     private function buildProductAttributesFromDictionary(array $entities): array
@@ -617,7 +885,8 @@ class ProductDeltaService
         return $this->mirrorCompareFields !== []
             || $this->mirrorTranslationHashField !== null
             || $this->mirrorAttributeHashField !== null
-            || $this->mirrorSeoHashField !== null;
+            || $this->mirrorSeoHashField !== null
+            || $this->mirrorRequiredSeoLanguages !== [];
     }
 
     private function hasSuccessfulMirrorRefreshRun(): bool
@@ -644,6 +913,7 @@ class ProductDeltaService
         $translationHashes = $this->fetchProductMirrorTranslationHashes();
         $attributeHashes = $this->fetchProductMirrorAttributeHashes();
         $seoHashes = $this->fetchProductMirrorSeoHashes();
+        $seoLanguages = $this->fetchMirrorSeoLanguages(1);
 
         $stmt = $this->stageDb->query(
             "SELECT
@@ -685,6 +955,7 @@ class ProductDeltaService
                 'translation_hash' => $productId !== null ? ($translationHashes[$productId] ?? null) : null,
                 'attribute_hash' => $productId !== null ? ($attributeHashes[$productId] ?? null) : null,
                 'seo_hash' => $productId !== null ? ($seoHashes[$productId] ?? null) : null,
+                'seo_languages' => $productId !== null ? ($seoLanguages[$productId] ?? []) : [],
             ];
         }
 
@@ -695,6 +966,7 @@ class ProductDeltaService
     {
         $translationHashes = $this->fetchCategoryMirrorTranslationHashes();
         $seoHashes = $this->fetchCategoryMirrorSeoHashes();
+        $seoLanguages = $this->fetchMirrorSeoLanguages(2);
 
         $stmt = $this->stageDb->query(
             "SELECT categories_id, external_id, parent_id, categories_image, categories_master_image, categories_status
@@ -724,6 +996,7 @@ class ProductDeltaService
                 'online_flag' => $this->normalizeScalar($row['categories_status'] ?? null),
                 'translation_hash' => $translationHashes[$categoryId] ?? null,
                 'seo_hash' => $seoHashes[$categoryId] ?? null,
+                'seo_languages' => $seoLanguages[$categoryId] ?? [],
             ];
         }
 
@@ -881,6 +1154,38 @@ class ProductDeltaService
         }
 
         return $this->hashGroupedComparableRows($grouped);
+    }
+
+    private function fetchMirrorSeoLanguages(int $linkType): array
+    {
+        $stmt = $this->stageDb->prepare(
+            "SELECT link_id, language_code
+             FROM `xt_mirror_seo_url`
+             WHERE link_type = :link_type
+               AND url_text IS NOT NULL
+               AND TRIM(url_text) <> ''
+             ORDER BY link_id ASC, language_code ASC"
+        );
+        $stmt->execute([
+            ':link_type' => $linkType,
+        ]);
+
+        $languagesByLinkId = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $linkId = $this->normalizeEntityId($row['link_id'] ?? null);
+            $languageCode = $this->normalizeString($row['language_code'] ?? null);
+            if ($linkId === null || $languageCode === null || !in_array($languageCode, self::SEO_LANGUAGES, true)) {
+                continue;
+            }
+
+            $languagesByLinkId[$linkId][$languageCode] = true;
+        }
+
+        foreach ($languagesByLinkId as $linkId => $languageCodes) {
+            $languagesByLinkId[$linkId] = array_keys($languageCodes);
+        }
+
+        return $languagesByLinkId;
     }
 
     private function fetchProductMirrorAttributeHashes(): array
@@ -1059,11 +1364,27 @@ class ProductDeltaService
     private function mirrorDecision(array $payloadData, ?array $mirrorRow, bool $mirrorEnabled): array
     {
         if (!$mirrorEnabled) {
-            return ['enabled' => false, 'matched' => false, 'exists' => false];
+            return ['enabled' => false, 'matched' => false, 'exists' => false, 'repair' => false];
         }
 
         if ($mirrorRow === null) {
-            return ['enabled' => true, 'matched' => false, 'exists' => false];
+            return [
+                'enabled' => true,
+                'matched' => false,
+                'exists' => false,
+                'repair' => $this->mirrorRepairMissing,
+                'repair_reason' => $this->mirrorRepairMissing ? 'missing' : null,
+            ];
+        }
+
+        if (!$this->mirrorSeoLanguagesComplete($mirrorRow)) {
+            return [
+                'enabled' => true,
+                'matched' => false,
+                'exists' => true,
+                'repair' => true,
+                'repair_reason' => 'seo_languages',
+            ];
         }
 
         foreach ($this->mirrorCompareFields as $payloadPath => $mirrorField) {
@@ -1075,7 +1396,7 @@ class ProductDeltaService
             $mirrorValue = $this->normalizeScalar($mirrorRow[$mirrorField] ?? null);
 
             if (!$this->valuesEqual($payloadValue, $mirrorValue)) {
-                return ['enabled' => true, 'matched' => false, 'exists' => true];
+                return ['enabled' => true, 'matched' => false, 'exists' => true, 'repair' => false];
             }
         }
 
@@ -1084,7 +1405,7 @@ class ProductDeltaService
                 $this->buildStageTranslationHash($payloadData['translations'] ?? []),
                 $this->normalizeScalar($mirrorRow[$this->mirrorTranslationHashField] ?? null)
             )) {
-                return ['enabled' => true, 'matched' => false, 'exists' => true];
+                return ['enabled' => true, 'matched' => false, 'exists' => true, 'repair' => false];
             }
         }
 
@@ -1093,7 +1414,7 @@ class ProductDeltaService
                 $this->buildStageAttributeHash($payloadData['attributes'] ?? []),
                 $this->normalizeScalar($mirrorRow[$this->mirrorAttributeHashField] ?? null)
             )) {
-                return ['enabled' => true, 'matched' => false, 'exists' => true];
+                return ['enabled' => true, 'matched' => false, 'exists' => true, 'repair' => false];
             }
         }
 
@@ -1102,11 +1423,11 @@ class ProductDeltaService
                 $this->buildStageSeoHash($payloadData['translations'] ?? []),
                 $this->normalizeScalar($mirrorRow[$this->mirrorSeoHashField] ?? null)
             )) {
-                return ['enabled' => true, 'matched' => false, 'exists' => true];
+                return ['enabled' => true, 'matched' => false, 'exists' => true, 'repair' => false];
             }
         }
 
-        return ['enabled' => true, 'matched' => true, 'exists' => true];
+        return ['enabled' => true, 'matched' => true, 'exists' => true, 'repair' => false];
     }
 
     private function nextAction(?array $state, string $hash, array $mirrorDecision): ?string
@@ -1115,11 +1436,26 @@ class ProductDeltaService
             return (bool) ($mirrorDecision['exists'] ?? false) ? 'update' : 'insert';
         }
 
+        if (($mirrorDecision['repair'] ?? false) === true) {
+            return 'update';
+        }
+
         if (($state[$this->stateHashField] ?? null) !== $hash) {
             return 'update';
         }
 
         return null;
+    }
+
+    private function mirrorSeoLanguagesComplete(array $mirrorRow): bool
+    {
+        if ($this->mirrorRequiredSeoLanguages === []) {
+            return true;
+        }
+
+        $availableLanguages = $this->normalizeLanguageCodes($mirrorRow['seo_languages'] ?? null);
+
+        return array_diff($this->mirrorRequiredSeoLanguages, $availableLanguages) === [];
     }
 
     private function enqueue(string $entityId, string $action, array $payloadData, string $hash): bool
@@ -1627,5 +1963,27 @@ class ProductDeltaService
         $entityId = trim((string) $normalized);
 
         return $entityId === '' ? null : $entityId;
+    }
+
+    private function normalizeCategoryId(mixed $value): ?string
+    {
+        $categoryId = $this->normalizeEntityId($value);
+
+        return $categoryId === '0' ? null : $categoryId;
+    }
+
+    private function isTruthy(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (int) $value !== 0;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+
+        return $normalized !== '' && $normalized !== '0' && $normalized !== 'false' && $normalized !== 'no';
     }
 }

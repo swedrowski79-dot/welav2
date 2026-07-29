@@ -36,6 +36,15 @@ final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQue
             return;
         }
 
+        if ($entityType === 'media'
+            && ($relationDefinition['exclude_primary_image'] ?? false) === true
+            && $this->isPrimaryImage($stageRow)
+        ) {
+            $this->deleteRelation($entityDefinition, $relationDefinition, $stageRow);
+
+            return;
+        }
+
         $this->assertRelationPrerequisites($relationDefinition, $stageRow);
 
         $identityValue = $this->entityIdentityValue($entityDefinition, $stageRow);
@@ -231,6 +240,12 @@ final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQue
         }
 
         return str_contains($exception->getMessage(), "XT-Referenz fuer 'xt_products'");
+    }
+
+    private function isPrimaryImage(array $stageRow): bool
+    {
+        return (int) ($stageRow['position'] ?? 0) === 1
+            || trim((string) ($stageRow['source_slot'] ?? '')) === 'image_1';
     }
 
     private function deleteStaleDocumentLinks(string $relationTable, array $stageRow, mixed $currentRelationId): void

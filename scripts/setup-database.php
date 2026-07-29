@@ -77,6 +77,7 @@ function repairLegacySchema(PDO $pdo): void
             'translated_value' => 'VARCHAR(255) NULL AFTER `translated_name`',
         ],
         'raw_extra_article_translations' => ['intro_text' => 'MEDIUMTEXT NULL AFTER `name`'],
+        'raw_extra_category_translations' => ['description' => 'MEDIUMTEXT NULL AFTER `name`'],
     ];
 
     foreach ($columns as $table => $definitions) {

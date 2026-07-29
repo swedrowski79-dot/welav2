@@ -60,7 +60,7 @@ if (!is_array($welaConfig)) {
 }
 $GLOBALS['wela_api_config'] = $welaConfig;
 $GLOBALS['wela_api_request_id'] = bin2hex(random_bytes(8));
-$GLOBALS['wela_api_runtime_version'] = '2026-07-16-path-separator-fix-8';
+$GLOBALS['wela_api_runtime_version'] = '2026-07-29-translated-seo-path-fix-2';
 
 $earlyLog = static function (string $level, string $message, array $context = []) use ($welaConfig): void {
     $enabled = ($welaConfig['logging'] ?? false) === true
@@ -277,6 +277,7 @@ try {
                 'ok' => true,
                 'message' => 'XT-API und Datenbank erreichbar.',
                 'timestamp' => date(DATE_ATOM),
+                'runtime_version' => $GLOBALS['wela_api_runtime_version'] ?? null,
             ]);
             break;
 
