@@ -124,7 +124,10 @@ return [
                 'language_code' => ['from' => ['raw_extra_category_translations.language_code_normalized']],
                 'original_name' => ['from' => ['raw_extra_category_translations.original_name']],
                 'name' => ['from' => ['raw_extra_category_translations.name', 'raw_afs_categories.name'], 'strategy' => 'first_not_empty'],
-                'description' => ['from' => ['raw_afs_categories.description']],
+                'description' => [
+                    'from' => ['raw_extra_category_translations.description', 'raw_afs_categories.description'],
+                    'strategy' => 'first_not_empty',
+                ],
                 'meta_title' => [
                     'from' => [
                         'raw_extra_category_translations.meta_title',

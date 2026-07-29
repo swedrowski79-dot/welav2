@@ -297,6 +297,7 @@ return [
             'replace_by' => ['link_id', 'type'],
             'identity_columns' => ['m_id', 'link_id', 'type'],
             'delete_match_columns' => ['m_id', 'type'],
+            'exclude_primary_image' => true,
             'filter' => [
                 'type' => 'images',
             ],

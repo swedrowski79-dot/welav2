@@ -38,8 +38,11 @@ final class AfsExtrasBootstrapService
         $targetTable = (string) $targetEntity['table'];
         $columns = $sourceEntity['columns'];
 
-        if ($columns !== ($targetEntity['columns'] ?? [])) {
-            throw new RuntimeException("Entity '{$entityName}' column definitions do not match between bootstrap and target source.");
+        $missingTargetColumns = array_diff($columns, $targetEntity['columns'] ?? []);
+        if ($missingTargetColumns !== []) {
+            throw new RuntimeException(
+                "Entity '{$entityName}' target is missing bootstrap columns: " . implode(', ', $missingTargetColumns)
+            );
         }
 
         $quotedColumns = array_map(
@@ -116,12 +119,19 @@ final class AfsExtrasBootstrapService
                 `original_name` VARCHAR(255) NULL,
                 `language` VARCHAR(10) NULL,
                 `translated_name` VARCHAR(255) NULL,
+                `description` MEDIUMTEXT NULL,
                 `meta_description` MEDIUMTEXT NULL,
                 `meta_title` VARCHAR(255) NULL,
                 KEY `idx_category_translations_warengruppen_id` (`warengruppen_id`),
                 KEY `idx_category_translations_language` (`language`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
         );
+
+        if (!$this->columnExists($categoryTable, 'description')) {
+            $this->extraTargetDb->exec(
+                'ALTER TABLE ' . $this->quoteIdentifier($categoryTable, 'mysql') . ' ADD COLUMN `description` MEDIUMTEXT NULL AFTER `translated_name`'
+            );
+        }
 
         $this->extraTargetDb->exec(
             'CREATE TABLE IF NOT EXISTS `attribute_translations` (

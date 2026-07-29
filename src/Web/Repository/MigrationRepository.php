@@ -239,6 +239,20 @@ final class MigrationRepository
             return true;
         }
 
+        if ($version === '022_add_category_translation_description') {
+            if (!$this->tableExists('raw_extra_category_translations')) {
+                return false;
+            }
+
+            if ($this->columnExists('raw_extra_category_translations', 'description')) {
+                return true;
+            }
+
+            $this->stageDb->exec('ALTER TABLE `raw_extra_category_translations` ADD COLUMN `description` MEDIUMTEXT NULL AFTER `name`');
+
+            return true;
+        }
+
         return false;
     }
 

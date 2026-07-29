@@ -1,4 +1,7 @@
-data/*.sqlite
-data/*.db
+data/
+backups/
 .env
 wela-api/config.php
+wela-api-xt/config.php
+wela-api.zip
+wela-api slow/config.php

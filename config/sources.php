@@ -322,6 +322,7 @@ return [
                         'original_name',
                         'language',
                         'translated_name',
+                        'description',
                         'meta_description',
                         'meta_title',
                     ],
