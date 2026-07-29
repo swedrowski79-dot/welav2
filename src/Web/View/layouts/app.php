@@ -8,6 +8,7 @@ $navigationGroups = [
     'Betrieb' => [
         '/' => ['Dashboard', 'speedometer2'],
         '/pipeline' => ['Pipeline', 'play-circle'],
+        '/cron' => ['Cron-Zeitplan', 'clock'],
         '/pipeline/queue' => ['Export Queue', 'list-check'],
         '/sync-runs' => ['Laeufe', 'clock-history'],
         '/errors' => ['Fehler', 'exclamation-triangle'],

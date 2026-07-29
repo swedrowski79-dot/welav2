@@ -22,26 +22,56 @@ $configuredBatchSize = max(0, (int) ($envValues['EXPORT_WORKER_BATCH_SIZE'] ?? 0
 $configuredWorkerCount = max(1, (int) ($envValues['EXPORT_WORKER_COUNT'] ?? 1));
 $childMode = in_array('--child', $argv, true);
 $workerIndex = 0;
+$requestedEntityType = null;
+$requestedBatchSize = null;
 foreach ($argv as $arg) {
     if (is_string($arg) && str_starts_with($arg, '--worker-index=')) {
         $workerIndex = max(0, (int) substr($arg, strlen('--worker-index=')));
     }
+
+    if (is_string($arg) && str_starts_with($arg, '--entity=')) {
+        $requestedEntityType = trim(substr($arg, strlen('--entity=')));
+    }
+
+    if (is_string($arg) && ctype_digit($arg)) {
+        $requestedBatchSize = max(0, (int) $arg);
+    }
 }
-$limit = isset($argv[1]) && $argv[1] !== '--child' ? max(0, (int) $argv[1]) : $configuredBatchSize;
+$limit = $requestedBatchSize ?? $configuredBatchSize;
 $limit = $limit > 0 ? $limit : null;
+
+if ($requestedEntityType !== null && $requestedEntityType !== '') {
+    $matchingConfigKeys = array_values(array_filter(
+        (array) ($configDelta['export_queue_entities'] ?? []),
+        static function (mixed $configKey) use ($configDelta, $requestedEntityType): bool {
+            return is_string($configKey)
+                && (($configDelta[$configKey]['entity_type'] ?? null) === $requestedEntityType);
+        }
+    ));
+
+    if ($matchingConfigKeys === []) {
+        throw new InvalidArgumentException("Unbekannter Export-Entity-Filter '{$requestedEntityType}'.");
+    }
+
+    $configDelta['export_queue_entities'] = $matchingConfigKeys;
+}
 
 if (!$childMode && $configuredWorkerCount > 1) {
     $childProcesses = [];
     $batchArgument = $limit !== null ? ' ' . escapeshellarg((string) $limit) : '';
+    $entityArgument = $requestedEntityType !== null && $requestedEntityType !== ''
+        ? ' ' . escapeshellarg('--entity=' . $requestedEntityType)
+        : '';
 
     for ($index = 1; $index <= $configuredWorkerCount; $index++) {
         $logFile = sprintf('/tmp/export_queue_worker_%02d.log', $index);
         $command = sprintf(
-            '%s %s%s --child %s',
+            '%s %s%s --child %s%s',
             escapeshellarg(PHP_BINARY),
             escapeshellarg(__FILE__),
             $batchArgument,
-            escapeshellarg('--worker-index=' . $index)
+            escapeshellarg('--worker-index=' . $index),
+            $entityArgument
         );
 
         $process = proc_open($command, [
@@ -87,6 +117,7 @@ $runId = $monitor->start('export_queue_worker', [
     'batch_size' => $limit,
     'worker_index' => $workerIndex,
     'allow_parallel' => $childMode,
+    'entity_type_filter' => $requestedEntityType,
 ]);
 
 try {
@@ -97,7 +128,7 @@ try {
     $xtWriter = new XtCompositeWriter([
         new XtCategoryWriter($configSources, $configXtWrite),
         new XtProductWriter($configSources, $configXtWrite, $writerPerformanceLogger),
-        new XtMediaDocumentWriter($configSources, $configXtWrite),
+        new XtMediaDocumentWriter($configSources, $configXtWrite, $writerPerformanceLogger, $stageDb),
     ]);
     $stats = (new ExportQueueWorker($stageDb, $configDelta, $monitor, $runId, $xtWriter))->run($limit);
     $monitor->finish($runId, 'success', [

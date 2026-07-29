@@ -7,6 +7,15 @@ final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQue
     private ?array $documentMediaRowsById = null;
     private ?array $documentMediaLinks = null;
 
+    public function __construct(
+        array $sourcesConfig,
+        array $xtWriteConfig,
+        ?callable $performanceLogger = null,
+        private ?PDO $stageDb = null
+    ) {
+        parent::__construct($sourcesConfig, $xtWriteConfig, $performanceLogger);
+    }
+
     public function supports(string $entityType): bool
     {
         return in_array($entityType, ['media', 'document'], true);
@@ -127,6 +136,18 @@ final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQue
             }
         }
 
+        if ($entityType === 'document' && $done !== []) {
+            try {
+                $this->reconcileDocumentLinksWithStage();
+            } catch (Throwable $exception) {
+                foreach (array_keys($done) as $queueId) {
+                    $failed[$queueId] = $exception;
+                }
+
+                $done = [];
+            }
+        }
+
         return ['done' => $done, 'failed' => $failed];
     }
 
@@ -207,7 +228,31 @@ final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQue
             $where[$column] = $this->resolveExpression($expression, ['stage' => $stageRow], false);
         }
 
-        $this->client->deleteRows((string) ($relationDefinition['table'] ?? ''), $where);
+        $whereVariants = [$where];
+        $deleteMatchValues = $relationDefinition['delete_match_values'] ?? [];
+
+        if (is_array($deleteMatchValues)) {
+            foreach ($deleteMatchValues as $column => $values) {
+                $column = (string) $column;
+                if (!array_key_exists($column, $where) || !is_array($values) || $values === []) {
+                    continue;
+                }
+
+                $expandedVariants = [];
+                foreach ($whereVariants as $whereVariant) {
+                    foreach ($values as $value) {
+                        $whereVariant[$column] = $value;
+                        $expandedVariants[] = $whereVariant;
+                    }
+                }
+
+                $whereVariants = $expandedVariants;
+            }
+        }
+
+        foreach ($whereVariants as $whereVariant) {
+            $this->client->deleteRows((string) ($relationDefinition['table'] ?? ''), $whereVariant);
+        }
     }
 
     private function assertRelationPrerequisites(array $relationDefinition, array $stageRow): void
@@ -350,6 +395,97 @@ final class XtMediaDocumentWriter extends AbstractXtWriter implements XtBatchQue
         } while (true);
 
         return $rows;
+    }
+
+    private function reconcileDocumentLinksWithStage(): void
+    {
+        if ($this->stageDb === null) {
+            return;
+        }
+
+        $expectedLinks = [];
+        $stmt = $this->stageDb->query(
+            "SELECT afs_artikel_id, file_name
+             FROM stage_product_documents
+             WHERE afs_artikel_id IS NOT NULL
+               AND file_name IS NOT NULL
+               AND TRIM(file_name) <> ''"
+        );
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $key = $this->documentLinkKey($row['afs_artikel_id'] ?? null, $row['file_name'] ?? null);
+            if ($key !== null) {
+                $expectedLinks[$key] = true;
+            }
+        }
+
+        $productExternalIds = $this->lookupMap('xt_products', 'products_id', 'external_id');
+        $mediaRows = $this->documentMediaRowsById();
+        $deleted = 0;
+        $skippedWithoutMapping = 0;
+
+        foreach ($this->documentMediaLinks() as $index => $link) {
+            $linkType = trim((string) ($link['type'] ?? ''));
+            $linkClass = trim((string) ($link['class'] ?? ''));
+
+            if (!in_array($linkType, ['media', 'files'], true)
+                || ($linkClass !== '' && $linkClass !== 'product')
+            ) {
+                continue;
+            }
+
+            $mediaId = trim((string) ($link['m_id'] ?? ''));
+            $mediaLinkId = trim((string) ($link['ml_id'] ?? ''));
+            $productId = trim((string) ($link['link_id'] ?? ''));
+            $media = $mediaRows[$mediaId] ?? null;
+
+            if ($mediaId === '' || $mediaLinkId === '' || $productId === '' || !is_array($media)) {
+                $skippedWithoutMapping++;
+                continue;
+            }
+
+            $mediaType = trim((string) ($media['type'] ?? ''));
+            $mediaClass = trim((string) ($media['class'] ?? ''));
+            if ($mediaType !== 'files' || ($mediaClass !== '' && $mediaClass !== 'product')) {
+                continue;
+            }
+
+            $productExternalId = $productExternalIds[$productId] ?? null;
+            $key = $this->documentLinkKey($productExternalId, $media['file'] ?? null);
+            if ($key === null) {
+                $skippedWithoutMapping++;
+                continue;
+            }
+
+            if (isset($expectedLinks[$key])) {
+                continue;
+            }
+
+            $deleted += $this->client->deleteRows('xt_media_link', ['ml_id' => $mediaLinkId]);
+            unset($this->documentMediaLinks[$index]);
+        }
+
+        if (is_array($this->documentMediaLinks)) {
+            $this->documentMediaLinks = array_values($this->documentMediaLinks);
+        }
+
+        $this->logPerformance('Dokument-Link-Bestand mit Stage abgeglichen.', [
+            'expected_links' => count($expectedLinks),
+            'deleted_stale_links' => $deleted,
+            'skipped_without_mapping' => $skippedWithoutMapping,
+        ]);
+    }
+
+    private function documentLinkKey(mixed $productExternalId, mixed $fileName): ?string
+    {
+        $productExternalId = trim((string) ($productExternalId ?? ''));
+        $fileName = trim((string) ($fileName ?? ''));
+
+        if ($productExternalId === '' || $fileName === '') {
+            return null;
+        }
+
+        return $productExternalId . "\0" . mb_strtolower($fileName);
     }
 
     private function rememberDocumentMediaRow(mixed $mediaId, string $externalId, array $entityColumns): void

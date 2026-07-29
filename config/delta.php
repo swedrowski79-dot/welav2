@@ -181,11 +181,12 @@ return [
         ],
         'monitor_source' => 'delta_documents',
         'mirror_require_success_run' => true,
+        'mirror_repair_missing' => true,
+        'mirror_repair_mismatched' => true,
         'mirror_compare_fields' => [
             'afs_document_id' => 'afs_document_id',
             'afs_artikel_id' => 'afs_artikel_id',
             'file_name' => 'file_name',
-            'document_type' => 'document_type',
             'sort_order' => 'sort_order',
         ],
         'payload_fields' => [

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Web\Controller\AttributeDictionaryController;
+use App\Web\Controller\CronController;
 use App\Web\Controller\DashboardController;
 use App\Web\Controller\DocumentFileController;
 use App\Web\Controller\ErrorController;
@@ -28,8 +29,11 @@ $documentFileController = new DocumentFileController();
 $imageFileController = new ImageFileController();
 $translationController = new TranslationController();
 $attributeDictionaryController = new AttributeDictionaryController();
+$cronController = new CronController();
 
 $router->get('/', new DashboardController());
+$router->get('/cron', [$cronController, 'index']);
+$router->post('/cron/save', [$cronController, 'save']);
 $router->get('/pipeline', [$pipelineController, 'index']);
 $router->get('/pipeline/queue', [$pipelineController, 'queue']);
 $router->get('/document-files', [$documentFileController, 'index']);

@@ -31,7 +31,7 @@ services:
 
   php:
     build:
-      context: .
+      context: ./docker/php
       dockerfile: Dockerfile
     container_name: welav2-php
     working_dir: /app
@@ -39,7 +39,7 @@ services:
       - "8080:8080"
     volumes:
       - ./:/app
-    environment:
+    environment: &php-environment
       AFS_DB_HOST: ${AFS_DB_HOST:-host.docker.internal}
       AFS_DB_PORT: ${AFS_DB_PORT:-1435}
       AFS_DB_NAME: ${AFS_DB_NAME:-AFS_2018}
@@ -69,6 +69,25 @@ services:
       - |
         php /app/scripts/setup-database.php || echo "[db-setup] WARNUNG: Setup hatte Fehler; Webserver startet trotzdem."
         exec php -S 0.0.0.0:8080 -t public
+    restart: unless-stopped
+
+  cron:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    container_name: welav2-cron
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment: *php-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command:
+      - cron
+      - -f
     restart: unless-stopped
 
 volumes:

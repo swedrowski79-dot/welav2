@@ -32,6 +32,7 @@ class ProductDeltaService
     private array $mirrorRequiredSeoLanguages = [];
     private bool $mirrorRequireSuccessRun = true;
     private bool $mirrorRepairMissing = false;
+    private bool $mirrorRepairMismatched = false;
     private bool $seoPathDependency = false;
     private bool $excludePrimaryImage = false;
     private array $entityOrderBy = [];
@@ -87,6 +88,7 @@ class ProductDeltaService
             'mirror_missing' => 0,
             'mirror_mismatched' => 0,
             'mirror_repairs' => 0,
+            'mirror_mismatch_repairs' => 0,
             'mirror_seo_repairs' => 0,
             'mirror_removed_skipped' => 0,
             'mirror_enabled' => $mirrorEnabled,
@@ -160,7 +162,14 @@ class ProductDeltaService
                 if ($mirrorEnabled) {
                     if (($mirrorDecision['repair'] ?? false) === true) {
                         $stats['mirror_repairs']++;
-                        if (($mirrorDecision['repair_reason'] ?? null) !== 'missing') {
+                        if (($mirrorDecision['repair_reason'] ?? null) === 'mismatch') {
+                            $stats['mirror_mismatch_repairs']++;
+                        }
+                        if (in_array(
+                            $mirrorDecision['repair_reason'] ?? null,
+                            ['seo_languages', 'seo_dependency'],
+                            true
+                        )) {
                             $stats['mirror_seo_repairs']++;
                         }
                     }
@@ -250,7 +259,7 @@ class ProductDeltaService
             }
         }
 
-        if (in_array($this->entityType, ['product', 'category'], true) && $mirrorEnabled) {
+        if (in_array($this->entityType, ['product', 'category', 'document'], true) && $mirrorEnabled) {
             foreach ($this->findMirrorEntityRemovals(
                 $mirrorRows,
                 $currentEntityIds,
@@ -306,6 +315,7 @@ class ProductDeltaService
                 'mirror_missing' => $stats['mirror_missing'],
                 'mirror_mismatched' => $stats['mirror_mismatched'],
                 'mirror_repairs' => $stats['mirror_repairs'],
+                'mirror_mismatch_repairs' => $stats['mirror_mismatch_repairs'],
                 'mirror_seo_repairs' => $stats['mirror_seo_repairs'],
                 'mirror_removed_skipped' => $stats['mirror_removed_skipped'],
                 'mirror_live_removed' => $stats['mirror_live_removed'],
@@ -330,6 +340,7 @@ class ProductDeltaService
                 'mirror_missing' => $stats['mirror_missing'],
                 'mirror_mismatched' => $stats['mirror_mismatched'],
                 'mirror_repairs' => $stats['mirror_repairs'],
+                'mirror_mismatch_repairs' => $stats['mirror_mismatch_repairs'],
                 'mirror_seo_repairs' => $stats['mirror_seo_repairs'],
                 'mirror_removed_skipped' => $stats['mirror_removed_skipped'],
                 'mirror_live_removed' => $stats['mirror_live_removed'],
@@ -373,6 +384,7 @@ class ProductDeltaService
         $this->mirrorRequireSuccessRun = !array_key_exists('mirror_require_success_run', $config)
             || (bool) $config['mirror_require_success_run'];
         $this->mirrorRepairMissing = (bool) ($config['mirror_repair_missing'] ?? false);
+        $this->mirrorRepairMismatched = (bool) ($config['mirror_repair_mismatched'] ?? false);
         $this->seoPathDependency = (bool) ($config['seo_path_dependency'] ?? false);
         $this->excludePrimaryImage = (bool) ($config['exclude_primary_image'] ?? false);
         $this->entityOrderBy = $this->normalizeOrderBy($config['entity_order_by'] ?? null);
@@ -1288,22 +1300,20 @@ class ProductDeltaService
     {
         $stmt = $this->stageDb->query(
             "SELECT
-                stage.afs_document_id AS entity_id,
+                media.external_id AS entity_id,
                 product.external_id AS afs_artikel_id,
                 media.file AS file_name,
-                COALESCE(media.type, link.type) AS document_type,
                 link.sort_order
              FROM `xt_mirror_media_link` link
              INNER JOIN `xt_mirror_media` media ON media.id = link.m_id
              LEFT JOIN `xt_mirror_products` product ON product.products_id = link.link_id
-             INNER JOIN `stage_product_documents` stage
-                ON stage.afs_artikel_id = CAST(product.external_id AS UNSIGNED)
-               AND stage.file_name = media.file
-               AND stage.sort_order = link.sort_order
              WHERE (link.class IS NULL OR link.class = 'product')
-               AND link.type = 'files'
+               AND link.type IN ('media', 'files')
+               AND media.type = 'files'
+               AND media.external_id IS NOT NULL
+               AND TRIM(media.external_id) <> ''
                AND product.external_id IS NOT NULL
-             ORDER BY stage.afs_document_id ASC"
+             ORDER BY media.external_id ASC"
         );
 
         $rows = [];
@@ -1317,7 +1327,6 @@ class ProductDeltaService
                 'afs_document_id' => $this->normalizeScalar($row['entity_id'] ?? null),
                 'afs_artikel_id' => $this->normalizeScalar($row['afs_artikel_id'] ?? null),
                 'file_name' => $this->normalizeScalar($row['file_name'] ?? null),
-                'document_type' => $this->normalizeScalar($row['document_type'] ?? null),
                 'sort_order' => $this->normalizeScalar($row['sort_order'] ?? null),
             ];
         }
@@ -1396,7 +1405,13 @@ class ProductDeltaService
             $mirrorValue = $this->normalizeScalar($mirrorRow[$mirrorField] ?? null);
 
             if (!$this->valuesEqual($payloadValue, $mirrorValue)) {
-                return ['enabled' => true, 'matched' => false, 'exists' => true, 'repair' => false];
+                return [
+                    'enabled' => true,
+                    'matched' => false,
+                    'exists' => true,
+                    'repair' => $this->mirrorRepairMismatched,
+                    'repair_reason' => $this->mirrorRepairMismatched ? 'mismatch' : null,
+                ];
             }
         }
 

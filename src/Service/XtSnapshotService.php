@@ -385,27 +385,31 @@ final class XtSnapshotService
                 continue;
             }
 
-            if ($type !== 'images' && $type !== 'files') {
-                $stats['unsupported_links']++;
-                continue;
-            }
-
             $mediaId = $this->nullableInt($row['m_id'] ?? null);
             if ($mediaId === null || !isset($mediaById[$mediaId])) {
                 continue;
             }
 
             $media = $mediaById[$mediaId];
+            $mediaType = $this->trimString($media['type'] ?? null);
+            $isImage = $type === 'images';
+            $isDocument = in_array($type, ['media', 'files'], true) && $mediaType === 'files';
+
+            if (!$isImage && !$isDocument) {
+                $stats['unsupported_links']++;
+                continue;
+            }
+
             $externalId = $this->trimString($media['external_id'] ?? null);
             $productExternalId = $productIdMap[$this->nullableInt($row['link_id'] ?? null) ?? -1] ?? null;
 
             if ($externalId === null) {
-                $stats[$type === 'images' ? 'media_without_external_id' : 'documents_without_external_id']++;
+                $stats[$isImage ? 'media_without_external_id' : 'documents_without_external_id']++;
                 continue;
             }
 
             if ($productExternalId === null) {
-                $stats[$type === 'images' ? 'media_without_product_mapping' : 'documents_without_product_mapping']++;
+                $stats[$isImage ? 'media_without_product_mapping' : 'documents_without_product_mapping']++;
                 continue;
             }
 
@@ -421,10 +425,10 @@ final class XtSnapshotService
                 'imported_at' => $importedAt,
             ];
 
-            if ($type === 'images') {
+            if ($isImage) {
                 $snapshot = $baseSnapshot + [
                     'media_external_id' => $externalId,
-                    'media_type' => $this->trimString($media['type'] ?? $type),
+                    'media_type' => $mediaType ?? $type,
                 ];
                 $snapshot['snapshot_hash'] = $this->hashSnapshot($snapshot, ['snapshot_hash']);
                 $mediaSnapshots[] = $snapshot;
@@ -434,7 +438,7 @@ final class XtSnapshotService
             $snapshot = $baseSnapshot + [
                 'document_external_id' => $externalId,
                 'afs_document_id' => $this->nullableInt($externalId),
-                'document_type' => $this->trimString($media['type'] ?? $type),
+                'document_type' => $mediaType ?? $type,
             ];
             $snapshot['snapshot_hash'] = $this->hashSnapshot($snapshot, ['snapshot_hash']);
             $documentSnapshots[] = $snapshot;

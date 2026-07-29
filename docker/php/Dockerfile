@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        cron \
         curl \
         gnupg2 \
         unixodbc \
@@ -32,7 +33,10 @@ RUN docker-php-ext-install \
 RUN pecl install sqlsrv-5.12.0 pdo_sqlsrv-5.12.0 \
     && docker-php-ext-enable sqlsrv pdo_sqlsrv
 
-COPY docker/php/conf.d/zz-memory-limit.ini /usr/local/etc/php/conf.d/zz-memory-limit.ini
+COPY conf.d/zz-memory-limit.ini /usr/local/etc/php/conf.d/zz-memory-limit.ini
+COPY cron.d/welav2 /etc/cron.d/welav2
+
+RUN chmod 0644 /etc/cron.d/welav2
 
 ENV PATH="${PATH}:/opt/mssql-tools18/bin"
 
